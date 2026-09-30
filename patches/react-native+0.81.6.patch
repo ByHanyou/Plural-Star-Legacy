@@ -1,0 +1,10 @@
+diff --git a/node_modules/react-native/Libraries/StyleSheet/StyleSheet.d.ts b/node_modules/react-native/Libraries/StyleSheet/StyleSheet.d.ts
+--- a/node_modules/react-native/Libraries/StyleSheet/StyleSheet.d.ts
++++ b/node_modules/react-native/Libraries/StyleSheet/StyleSheet.d.ts
+@@ -146,5 +146,5 @@ export namespace StyleSheet {
+    * so `absoluteFill` can be used for convenience and to reduce duplication of these repeated
+    * styles.
+    */
+-  export const absoluteFill: RegisteredStyle<AbsoluteFillStyle>;
++  export const absoluteFill: AbsoluteFillStyle;
+ }

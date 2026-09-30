@@ -1,0 +1,19 @@
+diff --git a/node_modules/@notifee/react-native/dist/validators/validateTrigger.js b/node_modules/@notifee/react-native/dist/validators/validateTrigger.js
+--- a/node_modules/@notifee/react-native/dist/validators/validateTrigger.js
++++ b/node_modules/@notifee/react-native/dist/validators/validateTrigger.js
+@@ -52,6 +52,15 @@ function validateTimestampTrigger(trigger) {
+         }
+         out.repeatFrequency = trigger.repeatFrequency;
+     }
++    if ((0, utils_1.objectHasProperty)(trigger, 'repeatInterval') && !(0, utils_1.isUndefined)(trigger.repeatInterval)) {
++        if (out.repeatFrequency === Trigger_1.RepeatFrequency.NONE) {
++            throw new Error("'trigger.repeatInterval' requires a repeating repeatFrequency value.");
++        }
++        if (!(0, utils_1.isNumber)(trigger.repeatInterval) || !Number.isInteger(trigger.repeatInterval) || trigger.repeatInterval <= 0) {
++            throw new Error("'trigger.repeatInterval' expected a positive integer value.");
++        }
++        out.repeatInterval = trigger.repeatInterval;
++    }
+     if ((0, utils_1.objectHasProperty)(trigger, 'alarmManager') && !(0, utils_1.isUndefined)(trigger.alarmManager)) {
+         if ((0, utils_1.isBoolean)(trigger.alarmManager)) {
+             if (trigger.alarmManager) {

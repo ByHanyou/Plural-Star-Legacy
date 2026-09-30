@@ -1,0 +1,62 @@
+diff --git a/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java b/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java
+index 56149f1..1706790 100644
+--- a/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java
++++ b/node_modules/react-native-image-picker/android/src/main/java/com/imagepicker/ImagePickerModuleImpl.java
+@@ -169,16 +169,28 @@ public class ImagePickerModuleImpl implements ActivityEventListener {
+         }
+     }
+ 
++    private synchronized Callback claimCallback() {
++        Callback claimed = callback;
++        callback = null;
++        return claimed;
++    }
++
+     void onAssetsObtained(List<Uri> fileUris) {
++        final Callback claimed = claimCallback();
++        if (claimed == null) {
++            return;
++        }
++
+         ExecutorService executor = Executors.newSingleThreadExecutor();
+ 
+         executor.submit(() -> {
+             try {
+-                callback.invoke(getResponseMap(fileUris, options, reactContext));
++                claimed.invoke(getResponseMap(fileUris, options, reactContext));
+             } catch (RuntimeException exception) {
+-                callback.invoke(getErrorMap(errOthers, exception.getMessage()));
+-            } finally {
+-                callback = null;
++                try {
++                    claimed.invoke(getErrorMap(errOthers, exception.getMessage()));
++                } catch (RuntimeException ignored) {
++                }
+             }
+         });
+     }
+@@ -195,14 +207,19 @@ public class ImagePickerModuleImpl implements ActivityEventListener {
+             if (requestCode == REQUEST_LAUNCH_IMAGE_CAPTURE) {
+                 deleteFile(fileUri);
+             }
+-            try {
+-                callback.invoke(getCancelMap());
++            final Callback claimed = claimCallback();
++            if (claimed == null) {
+                 return;
++            }
++            try {
++                claimed.invoke(getCancelMap());
+             } catch (RuntimeException exception) {
+-                callback.invoke(getErrorMap(errOthers, exception.getMessage()));
+-            } finally {
+-                callback = null;
++                try {
++                    claimed.invoke(getErrorMap(errOthers, exception.getMessage()));
++                } catch (RuntimeException ignored) {
++                }
+             }
++            return;
+         }
+ 
+         switch (requestCode) {

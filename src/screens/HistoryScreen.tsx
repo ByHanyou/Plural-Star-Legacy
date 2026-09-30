@@ -1,0 +1,743 @@
+import React, {useState, useMemo, useCallback, useDeferredValue} from 'react';
+import {View, ScrollView, TouchableOpacity, StyleSheet, Alert, useWindowDimensions} from 'react-native';
+import {Text, TextInput} from '../components/AppText';
+import {Avatar} from '../components/Avatar';
+import {useTranslation} from 'react-i18next';
+import {Fonts, fontScale, ThemeColors} from '../theme';
+import {useAppStore} from '../store/appStore';
+import {useMinuteTick} from '../hooks/useMinuteTick';
+import {saveHistory} from '../store/actions';
+import {AccentText} from '../components/AccentText';
+import {HistoryEntry, JournalEntry, Member, FrontTierKey, fmtTime, fmtDate, fmtDur, fmtNum, TIER_LABELS, translateMood, sortMembersBySearch, memberMatchesSearch, singletStatuses, buildEffectiveEnd} from '../utils';
+import {store, KEYS} from '../storage';
+import {FlashList} from '@shopify/flash-list';
+import {FrontTimeline} from '../components/FrontTimeline';
+
+const memberInEntry = (memberId: string, entry: HistoryEntry): boolean =>
+  (entry.memberIds || []).includes(memberId) ||
+  (entry.coFrontIds || []).includes(memberId) ||
+  (entry.coConsciousIds || []).includes(memberId);
+
+const tierDetailsFor = (memberId: string, entry: HistoryEntry): {mood?: string; note?: string; location?: string; energy?: number} => {
+  const tier = memberTierInEntry(memberId, entry);
+  if (tier === 'coFront') return {mood: entry.coFrontMood, note: entry.coFrontNote, location: entry.coFrontLocation, energy: entry.coFrontEnergy};
+  if (tier === 'coConscious') return {mood: entry.coConsciousMood, note: entry.coConsciousNote, location: entry.coConsciousLocation, energy: entry.coConsciousEnergy};
+  return {mood: entry.mood, note: entry.note, location: entry.location, energy: entry.energyLevel};
+};
+
+const changeTierDetailsFor = (entry: HistoryEntry): {mood?: string; note?: string; location?: string; energy?: number} => {
+  if (entry.changeTier === 'coFront') return {mood: entry.coFrontMood, note: entry.coFrontNote, location: entry.coFrontLocation, energy: entry.coFrontEnergy};
+  if (entry.changeTier === 'coConscious') return {mood: entry.coConsciousMood, note: entry.coConsciousNote, location: entry.coConsciousLocation, energy: entry.coConsciousEnergy};
+  return {mood: entry.mood, note: entry.note, location: entry.location, energy: entry.energyLevel};
+};
+
+const memberTierInEntry = (memberId: string, entry: HistoryEntry): FrontTierKey | null =>
+  (entry.memberIds || []).includes(memberId) ? 'primary'
+  : (entry.coFrontIds || []).includes(memberId) ? 'coFront'
+  : (entry.coConsciousIds || []).includes(memberId) ? 'coConscious'
+  : null;
+
+type SubTab = 'front' | 'member' | 'timeline';
+
+interface Props {
+  theme: ThemeColors;
+  singlet?: boolean;
+  selfId?: string;
+  onEditEntry?: (originalIndex: number) => void;
+  readOnly?: boolean;
+  historyOverride?: HistoryEntry[];
+  membersOverride?: Member[];
+  journalOverride?: JournalEntry[];
+}
+
+const TierRow = React.memo(function TierRow({label, ids, color, expanded, cap, memberMap, fs, T}: {
+  label: string; ids: string[] | undefined; color: string; expanded?: boolean; cap?: number;
+  memberMap: Map<string, Member>; fs: (n: number) => number; T: ThemeColors;
+}) {
+  const allMembers = (ids || []).map(id => memberMap.get(id)).filter(Boolean) as Member[];
+  if (allMembers.length === 0) return null;
+  const visible = (expanded || cap === undefined) ? allMembers : allMembers.slice(0, Math.max(0, cap));
+  const hidden = allMembers.length - visible.length;
+  const namesText = visible.map(m => m.name).join(', ') + (hidden > 0 ? `, +${hidden}` : '');
+  return (
+    <View style={{flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 2}}>
+      <View style={{width: 6, height: 6, borderRadius: 3, backgroundColor: color, marginTop: 5}} />
+      <Text style={{fontSize: fs(10), color, fontWeight: '600', letterSpacing: 0.5, marginTop: 1}}>{label}</Text>
+      <Text style={{flex: 1, fontSize: fs(11), color: T.dim}} numberOfLines={expanded ? undefined : 1}>{namesText}</Text>
+    </View>
+  );
+});
+
+interface FrontHistoryEntryRowProps {
+  entry: HistoryEntry;
+  isLastInGroup: boolean;
+  originalIndex: number;
+  entryKey: string;
+  isExpanded: boolean;
+  memberMap: Map<string, Member>;
+  T: ThemeColors;
+  fs: (n: number) => number;
+  t: (key: string, opts?: any) => string;
+  selfId?: string;
+  singlet?: boolean;
+  effectiveEnd: number | null;
+  onToggleExpand: (key: string) => void;
+  onEditEntry?: (originalIndex: number) => void;
+  onDelete?: (originalIndex: number) => void;
+}
+
+const FrontHistoryEntryRow = React.memo(function FrontHistoryEntryRow({
+  entry, isLastInGroup, originalIndex, entryKey, isExpanded, memberMap, T, fs, t, selfId, singlet, effectiveEnd, onToggleExpand, onEditEntry, onDelete,
+}: FrontHistoryEntryRowProps) {
+  const allPrimary = (entry.memberIds || []).map(id => memberMap.get(id)).filter(Boolean) as Member[];
+  const withoutSelf = singlet && selfId ? allPrimary.filter(m => m.id !== selfId) : allPrimary;
+  const primaryFronters = singlet && withoutSelf.length === 0 ? allPrimary : withoutSelf;
+  const displayEnd = entry.endTime ?? effectiveEnd;
+  const isOpen = displayEnd === null;
+  const hasCoFront = (entry.coFrontIds || []).length > 0;
+  const hasCoConscious = (entry.coConsciousIds || []).length > 0;
+  const NAME_CAP = 6;
+  const coFrontCount = entry.coFrontIds?.length || 0;
+  const coConCount = entry.coConsciousIds?.length || 0;
+  const totalMembers = primaryFronters.length + coFrontCount + coConCount;
+  const PRIMARY_TRUNC_THRESHOLD = 32;
+  const primaryBudget = isExpanded ? primaryFronters.length : Math.min(primaryFronters.length, NAME_CAP);
+  const remainAfterPrimary = Math.max(0, NAME_CAP - primaryBudget);
+  const coFrontBudget = isExpanded ? coFrontCount : Math.min(coFrontCount, remainAfterPrimary);
+  const remainAfterCoFront = Math.max(0, remainAfterPrimary - coFrontBudget);
+  const coConBudget = isExpanded ? coConCount : Math.min(coConCount, remainAfterCoFront);
+  const visiblePrimary = primaryFronters.slice(0, primaryBudget);
+  const hiddenPrimary = primaryFronters.length - visiblePrimary.length;
+  const primaryDisplay = visiblePrimary.map(m => m.name).join(', ')
+    + (hiddenPrimary > 0 ? `, +${hiddenPrimary}` : '');
+  const showToggle =
+    totalMembers > NAME_CAP || primaryDisplay.length > PRIMARY_TRUNC_THRESHOLD;
+  return (
+    <View style={{flexDirection: 'row', gap: 10}}>
+      <View style={{alignItems: 'center', width: 16}}>
+        <View style={{width: 8, height: 8, borderRadius: 4,
+          backgroundColor: isOpen ? T.accent : T.dim, marginTop: 16}} />
+        {!isLastInGroup &&
+          <View style={{flex: 1, width: 1, backgroundColor: T.border, marginTop: 2}} />}
+      </View>
+      <View style={[s.card, {flex: 1, backgroundColor: T.card,
+        borderColor: isOpen ? `${T.accent}40` : T.border, marginBottom: 8}]}>
+        <View style={{flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 4}}>
+          <View style={{flexDirection: 'row'}}>
+            {primaryFronters.slice(0, 3).map((m, j) => (
+              <View key={m.id} style={{marginLeft: j ? -8 : 0, zIndex: 10 - j}}>
+                <Avatar member={m} size={26} T={T} />
+              </View>
+            ))}
+          </View>
+          <Text style={{flex: 1, fontSize: fs(14), fontWeight: '500', color: T.text}} numberOfLines={isExpanded ? undefined : 1}>
+            {primaryDisplay || t('common.unknown')}
+          </Text>
+          <AccentText T={T} style={{fontSize: fs(12), color: T.accent, fontWeight: '500'}}>
+            {fmtDur(entry.startTime, displayEnd)}
+          </AccentText>
+        </View>
+        {(hasCoFront || hasCoConscious) && (
+          <View style={{marginBottom: 4}}>
+            <TierRow label={t('tier.coFrontShort')} ids={entry.coFrontIds} color={T.info} expanded={isExpanded} cap={coFrontBudget} memberMap={memberMap} fs={fs} T={T} />
+            <TierRow label={t('tier.coConShort')} ids={entry.coConsciousIds} color={T.success} expanded={isExpanded} cap={coConBudget} memberMap={memberMap} fs={fs} T={T} />
+          </View>
+        )}
+        <Text style={{fontSize: fs(11), color: T.muted, marginBottom: 4}}>
+          {fmtTime(entry.startTime)}
+          {isOpen ? ` → ${t('history.now')}` : displayEnd ? ` → ${fmtTime(displayEnd)}` : ''}
+        </Text>
+        {(entry.mood || entry.location || entry.energyLevel !== undefined) && (
+          <View style={{flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 4}}>
+            {entry.mood && (
+              <View style={[s.badge, {backgroundColor: T.surface}]}>
+                <Text style={{fontSize: fs(10), color: T.dim}}>{t('history.mood')} </Text>
+                <Text style={{fontSize: fs(11), color: T.text, fontWeight: '500'}}>{translateMood(entry.mood, t)}</Text>
+              </View>
+            )}
+            {entry.location && (
+              <View style={[s.badge, {backgroundColor: T.surface}]}>
+                <Text style={{fontSize: fs(10), color: T.dim}}>{t('history.at')} </Text>
+                <Text style={{flexShrink: 1, fontSize: fs(11), color: T.text, fontWeight: '500'}} numberOfLines={1}>{entry.location}</Text>
+              </View>
+            )}
+            {entry.energyLevel !== undefined && (
+              <View style={[s.badge, {backgroundColor: T.surface}]}>
+                <Text style={{fontSize: fs(10), color: T.dim}}>{t('energy.label')} </Text>
+                <Text style={{fontSize: fs(11), color: T.text, fontWeight: '500'}}>{entry.energyLevel}/10</Text>
+              </View>
+            )}
+          </View>
+        )}
+        {isExpanded && ([
+          {label: t('tier.coFrontShort'), color: T.info, mood: entry.coFrontMood, location: entry.coFrontLocation, energy: entry.coFrontEnergy, note: entry.coFrontNote},
+          {label: t('tier.coConShort'), color: T.success, mood: entry.coConsciousMood, location: entry.coConsciousLocation, energy: entry.coConsciousEnergy, note: entry.coConsciousNote},
+        ] as const).map(td => (
+          (td.mood || td.location || td.energy !== undefined || td.note) ? (
+            <View key={td.label} style={{marginBottom: 4}}>
+              <View style={{flexDirection: 'row', gap: 8, flexWrap: 'wrap', alignItems: 'center'}}>
+                <Text style={{fontSize: fs(10), color: td.color, fontWeight: '600'}}>{td.label}</Text>
+                {td.mood ? (
+                  <View style={[s.badge, {backgroundColor: T.surface}]}>
+                    <Text style={{fontSize: fs(10), color: T.dim}}>{t('history.mood')} </Text>
+                    <Text style={{fontSize: fs(11), color: T.text, fontWeight: '500'}}>{translateMood(td.mood, t)}</Text>
+                  </View>
+                ) : null}
+                {td.location ? (
+                  <View style={[s.badge, {backgroundColor: T.surface}]}>
+                    <Text style={{fontSize: fs(10), color: T.dim}}>{t('history.at')} </Text>
+                    <Text style={{flexShrink: 1, fontSize: fs(11), color: T.text, fontWeight: '500'}} numberOfLines={1}>{td.location}</Text>
+                  </View>
+                ) : null}
+                {td.energy !== undefined ? (
+                  <View style={[s.badge, {backgroundColor: T.surface}]}>
+                    <Text style={{fontSize: fs(10), color: T.dim}}>{t('energy.label')} </Text>
+                    <Text style={{fontSize: fs(11), color: T.text, fontWeight: '500'}}>{td.energy}/10</Text>
+                  </View>
+                ) : null}
+              </View>
+              {td.note ? (
+                <View style={{backgroundColor: T.surface, borderRadius: 6, padding: 7, marginTop: 4}}>
+                  <Text style={{fontSize: fs(12), color: T.dim, lineHeight: 17}}>{td.note}</Text>
+                </View>
+              ) : null}
+            </View>
+          ) : null
+        ))}
+        {entry.note ? (
+          <View style={{backgroundColor: T.surface, borderRadius: 6, padding: 8}}>
+            <Text style={{fontSize: fs(12), color: T.dim, lineHeight: 18}}>{entry.note}</Text>
+          </View>
+        ) : null}
+        <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4}}>
+          {showToggle ? (
+            <TouchableOpacity onPress={() => onToggleExpand(entryKey)} activeOpacity={0.7}
+              accessibilityRole="button" accessibilityState={{expanded: isExpanded}}
+              style={{paddingVertical: 2, paddingHorizontal: 6}}>
+              <Text style={{fontSize: fs(10), color: T.accent, fontWeight: '500'}}>
+                {isExpanded ? t('history.showLess') : t('history.showMore')}
+              </Text>
+            </TouchableOpacity>
+          ) : <View />}
+          <View style={{flexDirection: 'row', gap: 12}}>
+            {onEditEntry && (
+              <TouchableOpacity onPress={() => onEditEntry(originalIndex)} activeOpacity={0.7}
+                accessibilityRole="button" accessibilityLabel={t('history.editEntry')}
+                style={{paddingVertical: 2, paddingHorizontal: 6}}>
+                <Text style={{fontSize: fs(10), color: T.accent, opacity: 0.8}}>{t('history.editEntry')}</Text>
+              </TouchableOpacity>
+            )}
+            {onDelete && (
+              <TouchableOpacity onPress={() => onDelete(originalIndex)} activeOpacity={0.7}
+                accessibilityRole="button" accessibilityLabel={t('history.deleteEntry')}
+                style={{paddingVertical: 2, paddingHorizontal: 6}}>
+                <Text style={{fontSize: fs(10), color: T.danger, opacity: 0.6}}>{t('history.deleteEntry')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+});
+
+export const HistoryScreen = ({theme: T, singlet = false, selfId, onEditEntry, readOnly = false, historyOverride, membersOverride, journalOverride}: Props) => {
+  useMinuteTick();
+  const storeHistory = useAppStore(s => s.history);
+  const storeJournal = useAppStore(s => s.journal);
+  const storeMembers = useAppStore(s => s.members);
+  const history = historyOverride ?? storeHistory;
+  const journal = journalOverride ?? storeJournal;
+  const members = membersOverride ?? storeMembers;
+  const onSaveHistory = saveHistory;
+  const getMember = (id: string) => members.find(m => m.id === id);
+  const {t} = useTranslation();
+  const fs = useCallback(fontScale(T), [T.textScale]);
+  const win = useWindowDimensions();
+  const landscape = win.width > win.height;
+  const [subTab, setSubTab] = useState<SubTab>('front');
+  const [selectedMemberId, setSelectedMemberId] = useState<string | null>(null);
+  const [memberSearch, setMemberSearch] = useState('');
+  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set());
+
+  const memberMap = useMemo(() => {
+    const map = new Map<string, Member>();
+    for (const m of members) map.set(m.id, m);
+    return map;
+  }, [members]);
+
+  const toggleEntryExpanded = useCallback((key: string) => {
+    setExpandedEntries(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const startDelete = useCallback((entryIndex: number) => {
+    Alert.alert(t('history.deleteEntry'), t('history.deleteConfirm1'), [
+      {text: t('common.cancel'), style: 'cancel'},
+      {text: t('common.confirm'), style: 'destructive', onPress: () => {
+        Alert.alert(t('history.deleteEntry'), t('history.deleteConfirm2'), [
+          {text: t('common.cancel'), style: 'cancel'},
+          {text: t('common.confirm'), style: 'destructive', onPress: () => {
+            Alert.alert(t('history.deleteEntry'), t('history.deleteConfirm3'), [
+              {text: t('common.cancel'), style: 'cancel'},
+              {text: t('common.delete'), style: 'destructive', onPress: () => {
+                const updated = history.filter((_, i) => i !== entryIndex);
+                onSaveHistory(updated);
+              }},
+            ]);
+          }},
+        ]);
+      }},
+    ]);
+  }, [history, onSaveHistory, t]);
+
+  const selectedMember = selectedMemberId ? memberMap.get(selectedMemberId) : undefined;
+
+  type FrontHistoryRow =
+    | {kind: 'header'; key: string; date: string}
+    | {kind: 'entry'; key: string; entry: HistoryEntry; isLastInGroup: boolean; originalIndex: number; effectiveEnd: number | null};
+  const frontHistoryRows = useMemo<FrontHistoryRow[]>(() => {
+    const frontHistory = history.filter(e => !e.changeType || e.changeType === 'front');
+    if (frontHistory.length === 0) return [];
+    const effEnd = buildEffectiveEnd(history);
+    const frontGroups: Record<string, HistoryEntry[]> = {};
+    for (const e of frontHistory) {
+      const k = fmtDate(e.startTime);
+      if (!frontGroups[k]) frontGroups[k] = [];
+      frontGroups[k].push(e);
+    }
+    const indexMap = new Map<HistoryEntry, number>();
+    history.forEach((e, i) => { indexMap.set(e, i); });
+    const rows: FrontHistoryRow[] = [];
+    for (const [date, entries] of Object.entries(frontGroups)) {
+      rows.push({kind: 'header', key: `h-${date}`, date});
+      entries.forEach((entry, i) => {
+        rows.push({
+          kind: 'entry',
+          key: `e-${entry.startTime}-${i}`,
+          entry,
+          isLastInGroup: i === entries.length - 1,
+          originalIndex: indexMap.get(entry) ?? -1,
+          effectiveEnd: effEnd(entry),
+        });
+      });
+    }
+    return rows;
+  }, [history]);
+
+  const deferredRows = useDeferredValue(frontHistoryRows);
+
+  const renderFrontRow = useCallback(({item}: {item: FrontHistoryRow}) => {
+    if (item.kind === 'header') {
+      return (
+        <Text accessibilityRole="header" style={{fontSize: fs(10), letterSpacing: 1, textTransform: 'uppercase',
+          color: T.dim, marginBottom: 8, marginTop: 16, fontWeight: '600'}}>{item.date}</Text>
+      );
+    }
+    return (
+      <FrontHistoryEntryRow
+        entry={item.entry}
+        isLastInGroup={item.isLastInGroup}
+        originalIndex={item.originalIndex}
+        entryKey={item.key}
+        isExpanded={expandedEntries.has(item.key)}
+        memberMap={memberMap}
+        T={T}
+        fs={fs}
+        t={t}
+        selfId={selfId}
+        singlet={singlet}
+        effectiveEnd={item.effectiveEnd}
+        onToggleExpand={toggleEntryExpanded}
+        onEditEntry={readOnly ? undefined : onEditEntry}
+        onDelete={readOnly ? undefined : startDelete}
+      />
+    );
+  }, [expandedEntries, memberMap, T, fs, t, singlet, selfId, toggleEntryExpanded, onEditEntry, startDelete, readOnly]);
+
+  const tierNames = (ids: string[] | undefined) =>
+    (ids || []).map(id => memberMap.get(id)).filter(Boolean).map(m => m!.name).join(', ');
+
+  const mergedSessions = useMemo(() => {
+    if (!selectedMemberId) return [];
+    const fronts = history
+      .filter(e => (!e.changeType || e.changeType === 'front') && memberInEntry(selectedMemberId, e))
+      .slice()
+      .sort((a, b) => a.startTime - b.startTime);
+    const out: {startTime: number; endTime: number | null; tier: FrontTierKey; last: HistoryEntry; count: number}[] = [];
+    for (const e of fronts) {
+      const tier = memberTierInEntry(selectedMemberId, e) || 'primary';
+      const prev = out[out.length - 1];
+      if (prev && prev.tier === tier && prev.endTime !== null && Math.abs(e.startTime - prev.endTime) <= 1000) {
+        prev.endTime = e.endTime;
+        prev.last = e;
+        prev.count += 1;
+      } else {
+        out.push({startTime: e.startTime, endTime: e.endTime, tier, last: e, count: 1});
+      }
+    }
+    return out;
+  }, [history, selectedMemberId]);
+
+  const allMemberEvents = useMemo(() => {
+    if (!selectedMemberId) return [] as any[];
+    const memberHistoryEvents = [
+      ...mergedSessions.map(m => ({
+        type: 'front',
+        time: m.startTime,
+        tier: m.tier,
+        entry: {...m.last, startTime: m.startTime, endTime: m.endTime},
+      })),
+      ...history
+        .filter(e => memberInEntry(selectedMemberId, e) && e.changeType && e.changeType !== 'front')
+        .map(e => ({
+          type: e.changeType as string,
+          time: e.changeTime ?? e.startTime,
+          entry: e,
+        })),
+    ];
+    const memberJournalEvents = journal
+      .filter(e => (e.authorIds || []).includes(selectedMemberId))
+      .map(e => ({type: 'journal' as const, time: e.timestamp, journalEntry: e}));
+    return [...memberHistoryEvents, ...memberJournalEvents].sort((a, b) => b.time - a.time);
+  }, [selectedMemberId, mergedSessions, history, journal]);
+
+  const EVENT_ICONS: Record<string, string> = {
+    front:    '◈',
+    mood:     '◉',
+    location: '⊙',
+    note:     '✎',
+    journal:  '📖',
+  };
+
+  const eventDetails = (type: string, entry: HistoryEntry) =>
+    type === 'mood' || type === 'location' || type === 'note'
+      ? changeTierDetailsFor(entry)
+      : selectedMemberId
+      ? tierDetailsFor(selectedMemberId, entry)
+      : {mood: entry.mood, note: entry.note, location: entry.location, energy: entry.energyLevel};
+
+  const suffixFor = (tier?: FrontTierKey | null): string =>
+    tier && tier !== 'primary' ? t('history.tierSuffix', {tier: t(`tier.${tier === 'coFront' ? 'coFront' : 'coConscious'}`)}) : '';
+
+  const getEventLabel = (type: string, entry: HistoryEntry, d: {mood?: string; location?: string}, frontTier?: FrontTierKey | null): string => {
+    const tierSuffix = suffixFor(entry.changeTier);
+    if ((type === 'mood' || type === 'location') && d.mood && d.location) return t('history.moodLocationChanged') + tierSuffix;
+    if (type === 'mood')     return t('history.moodChanged') + tierSuffix;
+    if (type === 'location') return t('history.locationChanged') + tierSuffix;
+    if (type === 'note')     return t('history.noteUpdated') + tierSuffix;
+    if (type === 'journal')  return t('history.journalEntry');
+    return (singlet ? t('history.statusChange') : t('history.frontSwitch')) + (singlet ? '' : suffixFor(frontTier));
+  };
+  const tierColor = (tier?: FrontTierKey | null): string => tier === 'coFront' ? T.info : tier === 'coConscious' ? T.success : T.accent;
+
+  const pickerMembers = singlet
+    ? [...members.filter(m => m.id === selfId), ...singletStatuses(members)]
+    : members.filter(m => !m.isFacet && !m.isCustomFront && !m.deleted);
+  const pickerCustomFronts = singlet ? [] : members.filter(m => m.isCustomFront && !m.deleted);
+
+  return (
+    <View style={{flex: 1, backgroundColor: T.bg}}>
+      <View style={{backgroundColor: T.bg, paddingHorizontal: 16, paddingTop: landscape ? 6 : 16}}>
+        <Text
+          accessibilityRole="header"
+          style={[s.heading, {color: T.text}, landscape && {fontSize: fs(15)}]}
+          numberOfLines={1}
+          maxFontSizeMultiplier={1.2}>
+          {t('history.title')}
+        </Text>
+        <View style={{flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: T.border, marginTop: 4}}>
+          {(['front', 'member', 'timeline'] as SubTab[]).map(tab => (
+            <TouchableOpacity key={tab} onPress={() => setSubTab(tab)} activeOpacity={0.7}
+              accessibilityRole="tab" accessibilityState={{selected: subTab === tab}}
+              style={[s.subtab, {
+                flex: 1,
+                alignItems: 'center',
+                paddingVertical: landscape ? 5 : 10,
+                borderBottomWidth: 2,
+                borderBottomColor: subTab === tab ? T.accent : 'transparent',
+              }]}>
+              <AccentText T={T} numberOfLines={2} maxFontSizeMultiplier={1.3} style={{
+                fontSize: fs(13),
+                fontWeight: subTab === tab ? '600' : '400',
+                color: subTab === tab ? T.accent : T.dim,
+                textAlign: 'center',
+              }}>
+                {tab === 'front'
+                  ? (singlet ? t('history.statusHistory') : t('history.frontHistory'))
+                  : tab === 'member'
+                  ? (singlet ? t('history.byStatus') : t('history.memberHistory'))
+                  : t('history.timeline')}
+              </AccentText>
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
+      {subTab === 'front' && (
+        <FlashList
+          data={deferredRows}
+          keyExtractor={(item) => item.key}
+          getItemType={(item) => item.kind}
+          contentContainerStyle={{padding: 16, paddingBottom: 32}}
+          ListEmptyComponent={
+            <View style={{alignItems: 'center', paddingVertical: 48}}>
+              <Text style={{fontSize: fs(36), opacity: 0.4, marginBottom: 12}} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">◷</Text>
+              <Text style={{fontSize: fs(13), color: T.dim, textAlign: 'center'}}>
+                {singlet ? t('history.noHistorySinglet') : t('history.noHistory')}
+              </Text>
+            </View>
+          }
+          renderItem={renderFrontRow}
+        />
+      )}
+
+      {subTab === 'timeline' && (
+        <FrontTimeline T={T} history={history} members={members} singlet={singlet} />
+      )}
+
+      {subTab === 'member' && (
+        <View style={{flex: 1}}>
+          {pickerMembers.length === 0 && pickerCustomFronts.length === 0 && !members.some(m => m.isFacet && !m.deleted) ? (
+            <View style={{alignItems: 'center', paddingVertical: 48}}>
+              <Text style={{fontSize: fs(13), color: T.dim}}>{singlet ? t('profile.noStatuses') : t('history.noMembers')}</Text>
+            </View>
+          ) : (
+            <>
+              <View style={{margin: 16, marginBottom: 0}}>
+                {selectedMember && (
+                  <View style={{flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1,
+                    backgroundColor: T.card, borderColor: `${selectedMember.color}50`, marginBottom: 8}}>
+                    <Avatar member={selectedMember} size={32} T={T} />
+                    <View style={{flex: 1}}>
+                      <Text style={{fontSize: fs(15), fontWeight: '500', color: T.text}}>{selectedMember.name}</Text>
+                      {selectedMember.pronouns ? <Text style={{fontSize: fs(11), color: T.dim}}>{selectedMember.pronouns}</Text> : null}
+                    </View>
+                    <TouchableOpacity onPress={() => {setSelectedMemberId(null); setMemberSearch('');}} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${t('common.clear')} ${selectedMember.name}`}>
+                      <Text style={{fontSize: fs(14), color: T.dim}} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+                <TextInput value={memberSearch} onChangeText={setMemberSearch} accessibilityLabel={singlet ? t('history.searchStatus') : t('history.searchMember')} placeholder={singlet ? t('history.searchStatus') : t('history.searchMember')} placeholderTextColor={T.muted}
+                  style={{backgroundColor: T.surface, color: T.text, borderWidth: 1, borderColor: T.border, borderRadius: 10, paddingHorizontal: 14, paddingVertical: 9, fontSize: fs(13)}} />
+                {memberSearch.length > 0 && (
+                  <View style={{backgroundColor: T.card, borderRadius: 10, borderWidth: 1, borderColor: T.border, overflow: 'hidden', marginTop: 4, maxHeight: 280}}>
+                    <ScrollView nestedScrollEnabled showsVerticalScrollIndicator={true}>
+                      {(() => {
+                        const q = memberSearch.toLowerCase();
+                        const row = (m: Member) => (
+                          <TouchableOpacity key={m.id}
+                            onPress={() => {setSelectedMemberId(m.id); setMemberSearch('');}}
+                            activeOpacity={0.7}
+                            accessibilityRole="button" accessibilityState={{selected: selectedMemberId === m.id}} accessibilityLabel={m.name}
+                            style={{flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12,
+                              borderBottomWidth: 1, borderBottomColor: T.border,
+                              backgroundColor: selectedMemberId === m.id ? `${m.color}12` : 'transparent'}}>
+                            <Avatar member={m} size={28} T={T} />
+                            <Text style={{fontSize: fs(14), fontWeight: '500', color: T.text}}>{m.name}</Text>
+                            {selectedMemberId === m.id && <Text style={{color: m.color, marginLeft: 'auto'}} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">✓</Text>}
+                          </TouchableOpacity>
+                        );
+                        const facets = singlet ? [] : sortMembersBySearch(members.filter(m => m.isFacet && !m.deleted && memberMatchesSearch(m, q)), memberSearch);
+                        const customFronts = sortMembersBySearch(pickerCustomFronts.filter(m => memberMatchesSearch(m, q)), memberSearch);
+                        const roster = sortMembersBySearch(pickerMembers.filter(m => memberMatchesSearch(m, q)), memberSearch);
+                        const header = (label: string) => (
+                          <Text accessibilityRole="header" style={{fontSize: fs(10), letterSpacing: 1, textTransform: 'uppercase', color: T.dim, fontWeight: '600', paddingHorizontal: 12, paddingTop: 10, paddingBottom: 4}}>{label}</Text>
+                        );
+                        return (
+                          <>
+                            {!singlet && roster.length > 0 && header(t('members.title'))}
+                            {roster.map(row)}
+                            {facets.length > 0 && (
+                              <>
+                                {header(t('members.facets'))}
+                                {facets.map(row)}
+                              </>
+                            )}
+                            {customFronts.length > 0 && (
+                              <>
+                                {header(t('members.customFronts'))}
+                                {customFronts.map(row)}
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+
+              {selectedMember && allMemberEvents.length > 0 && (() => {
+                const effEnd = buildEffectiveEnd(history);
+                const totalMs = mergedSessions.reduce((sum, m) => {
+                  const end = m.endTime ?? (m.count > 1 ? Date.now() : (effEnd(m.last) ?? Date.now()));
+                  return sum + Math.max(0, end - m.startTime);
+                }, 0);
+                const entryEvents = allMemberEvents.filter((e: any) => e.entry);
+                const details = entryEvents.map((e: any) => tierDetailsFor(selectedMember.id, e.entry));
+                const moodCounts: Record<string, number> = {};
+                details.forEach(d => {if (d.mood) moodCounts[d.mood] = (moodCounts[d.mood] || 0) + 1;});
+                const topMood = Object.entries(moodCounts).sort((a, b) => b[1] - a[1])[0];
+                const locCounts: Record<string, number> = {};
+                details.forEach(d => {if (d.location) locCounts[d.location] = (locCounts[d.location] || 0) + 1;});
+                const topLoc = Object.entries(locCounts).sort((a, b) => b[1] - a[1])[0];
+                const energies = details.map(d => d.energy).filter((v): v is number => typeof v === 'number');
+                const avgEnergy = energies.length > 0 ? energies.reduce((a, b) => a + b, 0) / energies.length : null;
+                return (
+                  <View style={{flexDirection: 'row', gap: 8, margin: 16, marginBottom: 8}}>
+                    <View style={[s.stat, {backgroundColor: T.card, borderColor: T.border}]}>
+                      <Text style={{fontSize: fs(9), letterSpacing: 1, textTransform: 'uppercase', color: T.dim, marginBottom: 3}}>{t('history.totalTime')}</Text>
+                      <AccentText T={T} style={{fontSize: fs(15), fontWeight: '700', color: T.accent}}>{fmtDur(0, totalMs)}</AccentText>
+                    </View>
+                    <View style={[s.stat, {backgroundColor: T.card, borderColor: T.border}]}>
+                      <Text style={{fontSize: fs(9), letterSpacing: 1, textTransform: 'uppercase', color: T.dim, marginBottom: 3}}>{t('history.sessions')}</Text>
+                      <Text style={{fontSize: fs(15), fontWeight: '700', color: T.text}}>{mergedSessions.length}</Text>
+                    </View>
+                    {topMood && (
+                      <View style={[s.stat, {backgroundColor: T.card, borderColor: T.border}]}>
+                        <Text style={{fontSize: fs(9), letterSpacing: 1, textTransform: 'uppercase', color: T.dim, marginBottom: 3}}>{t('history.topMood')}</Text>
+                        <Text style={{fontSize: fs(12), fontWeight: '600', color: T.text}} numberOfLines={1}>{topMood[0]}</Text>
+                      </View>
+                    )}
+                    {topLoc && (
+                      <View style={[s.stat, {backgroundColor: T.card, borderColor: T.border}]}>
+                        <Text style={{fontSize: fs(9), letterSpacing: 1, textTransform: 'uppercase', color: T.dim, marginBottom: 3}}>{t('history.topLocation')}</Text>
+                        <Text style={{fontSize: fs(12), fontWeight: '600', color: T.text}} numberOfLines={1}>{topLoc[0]}</Text>
+                      </View>
+                    )}
+                    {avgEnergy !== null && (
+                      <View style={[s.stat, {backgroundColor: T.card, borderColor: T.border}]}>
+                        <Text style={{fontSize: fs(9), letterSpacing: 1, textTransform: 'uppercase', color: T.dim, marginBottom: 3}}>{t('stats.avgEnergy')}</Text>
+                        <Text style={{fontSize: fs(12), fontWeight: '600', color: T.text}} numberOfLines={1}>{fmtNum(avgEnergy, 1, 1)}/10</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })()}
+
+              <FlashList
+                data={allMemberEvents}
+                keyExtractor={(event: any, i: number) => `${event.type}-${event.time}-${i}`}
+                getItemType={(event: any) => event.type === 'journal' ? 'journal' : 'entry'}
+                contentContainerStyle={{padding: 16, paddingTop: 8, paddingBottom: 32}}
+                ListEmptyComponent={
+                  <View style={{alignItems: 'center', paddingVertical: 32}}>
+                    <Text style={{fontSize: fs(13), color: T.dim, textAlign: 'center'}}>
+                      {selectedMember ? t('history.noActivity', {name: selectedMember.name}) : t('history.selectMember')}
+                    </Text>
+                  </View>
+                }
+                renderItem={({item: event, index: i}: {item: any; index: number}) => {
+                    const icon = EVENT_ICONS[event.type] || '◈';
+                    const details = 'entry' in event && event.entry ? eventDetails(event.type, event.entry) : {};
+                    const label = 'entry' in event ? getEventLabel(event.type, event.entry, details, event.tier) : getEventLabel(event.type, {} as any, {});
+                    const color = event.type === 'front'
+                      ? tierColor(event.tier)
+                      : event.type === 'journal'
+                      ? T.info
+                      : T.dim;
+
+                    return (
+                      <View key={i} style={{flexDirection: 'row', gap: 10, marginBottom: 8}}>
+                        <View style={{alignItems: 'center', width: 16}}>
+                          <View style={{width: 8, height: 8, borderRadius: event.type === 'front' ? 4 : 2,
+                            backgroundColor: color, marginTop: 14}} />
+                          {i < allMemberEvents.length - 1 &&
+                            <View style={{flex: 1, width: 1, backgroundColor: T.border, marginTop: 2}} />}
+                        </View>
+                        <View style={[s.card, {flex: 1, backgroundColor: T.card, borderColor: T.border}]}>
+                          <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
+                            <Text style={{fontSize: fs(12), color, marginRight: 6, fontWeight: '600',
+                              }}>{icon} {label}</Text>
+                            <Text style={{fontSize: fs(11), color: T.muted, marginLeft: 'auto'}}>{fmtTime(event.time)}</Text>
+                          </View>
+
+                          {'entry' in event && event.entry && (() => {
+                            const e = event.entry;
+                            const d = details;
+                            const isOpen = e.endTime === null && event.type === 'front';
+                            return (
+                              <>
+                                {event.type === 'front' && (
+                                  <Text style={{fontSize: fs(11), color: T.muted, marginBottom: 4}}>
+                                    {fmtTime(e.startTime)}{isOpen ? ` → ${t('history.now')}` : e.endTime ? ` → ${fmtTime(e.endTime)}` : ''}
+                                    {'  '}<AccentText T={T} style={{color: T.accent}}>{fmtDur(e.startTime, e.endTime)}</AccentText>
+                                  </Text>
+                                )}
+                                {(d.mood || d.location || d.energy !== undefined) && (
+                                  <View style={{flexDirection: 'row', gap: 6, flexWrap: 'wrap', marginBottom: d.note ? 4 : 0}}>
+                                    {d.mood && (
+                                      <View style={[s.badge, {backgroundColor: T.surface}]}>
+                                        <Text style={{fontSize: fs(10), color: T.dim}}>{t('history.mood')} </Text>
+                                        <Text style={{fontSize: fs(11), color: T.text, fontWeight: '500'}}>{translateMood(d.mood, t)}</Text>
+                                      </View>
+                                    )}
+                                    {d.location && (
+                                      <View style={[s.badge, {backgroundColor: T.surface}]}>
+                                        <Text style={{fontSize: fs(10), color: T.dim}}>{t('history.at')} </Text>
+                                        <Text style={{flexShrink: 1, fontSize: fs(11), color: T.text, fontWeight: '500'}} numberOfLines={1}>{d.location}</Text>
+                                      </View>
+                                    )}
+                                    {d.energy !== undefined && (
+                                      <View style={[s.badge, {backgroundColor: T.surface}]}>
+                                        <Text style={{fontSize: fs(10), color: T.dim}}>{t('energy.label')} </Text>
+                                        <Text style={{fontSize: fs(11), color: T.text, fontWeight: '500'}}>{d.energy}/10</Text>
+                                      </View>
+                                    )}
+                                  </View>
+                                )}
+                                {d.note ? (
+                                  <View style={{backgroundColor: T.surface, borderRadius: 6, padding: 7}}>
+                                    <Text style={{fontSize: fs(12), color: T.dim, lineHeight: 17}}>{d.note}</Text>
+                                  </View>
+                                ) : null}
+                              </>
+                            );
+                          })()}
+
+                          {'journalEntry' in event && event.journalEntry && (
+                            <>
+                              <Text style={{fontSize: fs(14), fontWeight: '500', color: T.text, marginBottom: 2}}>
+                                {event.journalEntry.title || t('common.untitled')}
+                              </Text>
+                              {event.journalEntry.body ? (
+                                <Text style={{fontSize: fs(12), color: T.dim, lineHeight: 17}} numberOfLines={2}>
+                                  {event.journalEntry.body}
+                                </Text>
+                              ) : null}
+                              {(event.journalEntry.hashtags || []).length > 0 && (
+                                <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 6}}>
+                                  {(event.journalEntry.hashtags || []).map((t: string) => (
+                                    <View key={t} style={{paddingHorizontal: 7, paddingVertical: 2, borderRadius: 999,
+                                      backgroundColor: `${T.info}12`, borderWidth: 1, borderColor: `${T.info}30`}}>
+                                      <Text style={{fontSize: fs(10), color: T.info}}>{t}</Text>
+                                    </View>
+                                  ))}
+                                </View>
+                              )}
+                            </>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  }}
+              />
+            </>
+          )}
+        </View>
+      )}
+    </View>
+  );
+};
+
+const s = StyleSheet.create({
+  heading: {fontFamily: Fonts.display, fontSize: 22, fontWeight: '600', fontStyle: 'italic', marginBottom: 0},
+  subtab: {paddingHorizontal: 16, paddingVertical: 10, marginBottom: -1},
+  card: {borderRadius: 12, borderWidth: 1, padding: 12},
+  badge: {flexDirection: 'row', alignItems: 'center', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, maxWidth: '100%'},
+  stat: {flex: 1, borderRadius: 10, borderWidth: 1, padding: 10},
+});

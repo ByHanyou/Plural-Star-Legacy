@@ -1,0 +1,277 @@
+import React, {useState, useEffect, useRef} from 'react';
+import {View, ScrollView, TouchableOpacity, Alert, AccessibilityInfo, findNodeHandle, LayoutChangeEvent} from 'react-native';
+import {KeyboardAwareScrollView, KeyboardStickyView} from 'react-native-keyboard-controller';
+import {Text, TextInput} from '../components/AppText';
+import {useDragReorder} from '../hooks/useDragReorder';
+import {DragHandle, ReorderLockButton} from '../components/DragHandle';
+import {useTranslation} from 'react-i18next';
+import {Fonts, fontScale, ThemeColors} from '../theme';
+import {CustomFieldDef, CustomFieldType, uid} from '../utils';
+import {store, KEYS} from '../storage';
+import {NetworkManager} from '../network/NetworkManager';
+
+const FIELD_TYPES: {type: CustomFieldType; label: string; icon: string}[] = [
+  {type: 'text', label: 'Text', icon: 'Tt'},
+  {type: 'markdown', label: 'Rich Text', icon: '¶'},
+  {type: 'image', label: 'Image', icon: '🖼'},
+  {type: 'color', label: 'Color', icon: '🎨'},
+  {type: 'date', label: 'Date', icon: '📅'},
+  {type: 'month', label: 'Month', icon: '📅'},
+  {type: 'year', label: 'Year', icon: '📅'},
+  {type: 'monthYear', label: 'Month + Year', icon: '📅'},
+  {type: 'timestamp', label: 'Timestamp', icon: '🕐'},
+  {type: 'monthDay', label: 'Month + Day', icon: '📅'},
+  {type: 'dateRange', label: 'Date Range', icon: '📅'},
+  {type: 'number', label: 'Number', icon: '#'},
+  {type: 'toggle', label: 'Toggle', icon: '☑'},
+];
+
+interface Props {
+  theme: ThemeColors;
+  onUpdate: () => void;
+}
+
+export const CustomFieldsScreen = ({theme: T, onUpdate}: Props) => {
+  const {t} = useTranslation();
+  const fs = fontScale(T);
+  const [fields, setFields] = useState<CustomFieldDef[]>([]);
+  const [newName, setNewName] = useState('');
+  const [newType, setNewType] = useState<CustomFieldType>('text');
+  const [newMarkdown, setNewMarkdown] = useState(false);
+  const [showTypePicker, setShowTypePicker] = useState(false);
+  const [barH, setBarH] = useState(0);
+  const onBarLayout = (e: LayoutChangeEvent) => {
+    const h = Math.round(e.nativeEvent.layout.height);
+    setBarH(prev => (Math.abs(prev - h) > 1 ? h : prev));
+  };
+  const clearance = Math.max(barH, 64) + 24;
+  const [editId, setEditId] = useState<string | null>(null);
+  const [retypeId, setRetypeId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [reorderOn, setReorderOn] = useState(false);
+
+  const onDropField = (_key: string, from: number, to: number) => {
+    const updated = [...fields];
+    const [moved] = updated.splice(from, 1);
+    updated.splice(to, 0, moved);
+    save(updated.map((f, i) => ({...f, sortOrder: i})));
+    const msg = to === 0
+      ? t('common.movedToTop')
+      : to === updated.length - 1
+        ? t('common.movedToBottom')
+        : t('common.movedBelow', {name: updated[to - 1].name});
+    AccessibilityInfo.announceForAccessibility(msg);
+  };
+  const {drag, dragging, registerHeight, makeHandlePanHandlers} = useDragReorder({enabled: reorderOn, onDrop: onDropField});
+
+  useEffect(() => {
+    const load = () => { store.get<CustomFieldDef[]>(KEYS.customFieldDefs, []).then(d => setFields(d || [])); };
+    load();
+    return NetworkManager.onSyncApplied(load);
+  }, []);
+
+  const save = async (updated: CustomFieldDef[]) => {
+    setFields(updated);
+    await store.set(KEYS.customFieldDefs, updated);
+    onUpdate();
+  };
+
+  const addField = () => {
+    if (!newName.trim()) return;
+    const def: CustomFieldDef = {id: uid(), name: newName.trim(), type: newType, markdown: newMarkdown || undefined, sortOrder: fields.length};
+    save([...fields, def]);
+    setNewName(''); setNewType('text'); setNewMarkdown(false);
+  };
+
+  const deleteField = (id: string) => {
+    Alert.alert(t('customFields.deleteField'), t('customFields.deleteFieldMsg'), [
+      {text: t('common.cancel'), style: 'cancel'},
+      {text: t('common.delete'), style: 'destructive', onPress: () => save(fields.filter(f => f.id !== id))},
+    ]);
+  };
+
+  const renameField = (id: string) => {
+    if (!editName.trim()) return;
+    save(fields.map(f => f.id === id ? {...f, name: editName.trim()} : f));
+    setEditId(null);
+  };
+
+  const toggleMarkdown = (id: string) => {
+    save(fields.map(f => f.id === id ? {...f, markdown: !f.markdown} : f));
+  };
+
+  const moveBtnRefs = useRef<Record<string, any>>({});
+
+  const moveField = (id: string, direction: 'up' | 'down') => {
+    const idx = fields.findIndex(f => f.id === id);
+    if (direction === 'up' && idx === 0) return;
+    if (direction === 'down' && idx === fields.length - 1) return;
+    const updated = [...fields];
+    const swapIdx = direction === 'up' ? idx - 1 : idx + 1;
+    const neighbor = fields[swapIdx];
+    [updated[idx], updated[swapIdx]] = [updated[swapIdx], updated[idx]];
+    save(updated.map((f, i) => ({...f, sortOrder: i})));
+    const msg = swapIdx === 0
+      ? t('common.movedToTop')
+      : swapIdx === fields.length - 1
+        ? t('common.movedToBottom')
+        : direction === 'up'
+          ? t('common.movedAbove', {name: neighbor.name})
+          : t('common.movedBelow', {name: neighbor.name});
+    AccessibilityInfo.announceForAccessibility(msg);
+    setTimeout(() => {
+      const node = moveBtnRefs.current[id];
+      const tag = node ? findNodeHandle(node) : null;
+      if (tag) AccessibilityInfo.setAccessibilityFocus(tag);
+    }, 100);
+  };
+
+  const typeLabel = (type: CustomFieldType) => t(`customFields.type${type.charAt(0).toUpperCase() + type.slice(1)}` as any);
+
+  return (
+    <View style={{flex: 1}}>
+      <KeyboardAwareScrollView style={{flex: 1}} contentContainerStyle={{padding: 16, paddingBottom: clearance}} scrollEnabled={!dragging} bottomOffset={clearance}>
+        {fields.length > 1 && (
+          <View style={{flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 10}}>
+            <ReorderLockButton T={T} on={reorderOn} onToggle={() => setReorderOn(v => !v)} />
+          </View>
+        )}
+        {fields.length === 0 && (
+          <View style={{alignItems: 'center', paddingVertical: 48}}>
+            <Text style={{fontSize: fs(13), color: T.dim}}>{t('customFields.noFields')}</Text>
+          </View>
+        )}
+
+        {fields.map((fd, i) => (
+          <View
+            key={fd.id}
+            onLayout={e => registerHeight(fd.id, e.nativeEvent.layout.height + 10)}
+            style={{
+              backgroundColor: T.card,
+              borderRadius: 12,
+              borderWidth: 1,
+              borderColor: dragging && drag.key !== fd.id && drag.target === i ? T.accent : T.border,
+              padding: 14,
+              marginBottom: 10,
+              ...(drag.key === fd.id ? {transform: [{translateY: drag.dy}], zIndex: 10, elevation: 6} : null),
+            }}>
+            <View style={{flexDirection: 'row', alignItems: 'center', gap: 10}}>
+              <DragHandle T={T} active={reorderOn} panHandlers={makeHandlePanHandlers(fd.id, () => fields.map(f => f.id))} name={fd.name}
+                position={i + 1} count={fields.length}
+                onStep={dir => moveField(fd.id, dir === 1 ? 'down' : 'up')} />
+              <View style={{alignItems: 'center', gap: 2}}>
+                <TouchableOpacity
+                  ref={(el) => { moveBtnRefs.current[fd.id] = el; }}
+                  onPress={() => moveField(fd.id, 'up')}
+                  disabled={i === 0}
+                  hitSlop={{top: 10, bottom: 6, left: 12, right: 12}}
+                  activeOpacity={0.6}
+                  accessibilityRole="button"
+                  accessibilityLabel={i === 0 ? `${t('members.moveUp')}, ${fd.name}` : `${t('members.moveUp')}, ${fd.name}, ${t('members.moveAbove', {name: fields[i - 1].name})}`}
+                  accessibilityState={{disabled: i === 0}}
+                  style={{padding: 3}}>
+                  <Text style={{fontSize: fs(14), color: i === 0 ? T.border : T.muted, lineHeight: 14}}>▲</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => moveField(fd.id, 'down')}
+                  disabled={i === fields.length - 1}
+                  hitSlop={{top: 6, bottom: 10, left: 12, right: 12}}
+                  activeOpacity={0.6}
+                  accessibilityRole="button"
+                  accessibilityLabel={i === fields.length - 1 ? `${t('members.moveDown')}, ${fd.name}` : `${t('members.moveDown')}, ${fd.name}, ${t('members.moveBelow', {name: fields[i + 1].name})}`}
+                  accessibilityState={{disabled: i === fields.length - 1}}
+                  style={{padding: 3}}>
+                  <Text style={{fontSize: fs(14), color: i === fields.length - 1 ? T.border : T.muted, lineHeight: 14}}>▼</Text>
+                </TouchableOpacity>
+              </View>
+              <View style={{flex: 1}}>
+                {editId === fd.id ? (
+                  <View style={{flexDirection: 'row', gap: 8, alignItems: 'center'}}>
+                    <TextInput value={editName} onChangeText={setEditName} autoFocus accessibilityLabel={t('customFields.fieldName')}
+                      style={{flex: 1, backgroundColor: T.surface, color: T.text, borderWidth: 1, borderColor: T.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6, fontSize: fs(14)}}
+                      onSubmitEditing={() => renameField(fd.id)} />
+                    <TouchableOpacity onPress={() => renameField(fd.id)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={t('common.save')}>
+                      <Text style={{fontSize: fs(16), color: T.accent}}>✓</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity onPress={() => {setEditId(fd.id); setEditName(fd.name);}} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${fd.name}, ${t('common.edit')}`}>
+                    <Text style={{fontSize: fs(15), color: T.text, fontWeight: '500'}}>{fd.name}</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+              <TouchableOpacity onPress={() => deleteField(fd.id)} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${t('common.delete')} ${fd.name}`}>
+                <Text style={{fontSize: fs(18), color: T.danger}}>🗑</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={{flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8}}>
+              <Text style={{fontSize: fs(11), color: T.dim}}>{t('customFields.fieldType')}</Text>
+              <TouchableOpacity onPress={() => setRetypeId(retypeId === fd.id ? null : fd.id)} activeOpacity={0.7}
+                accessibilityRole="button" accessibilityState={{expanded: retypeId === fd.id}}
+                accessibilityLabel={`${t('customFields.fieldType')} — ${fd.name}`} accessibilityValue={{text: typeLabel(fd.type)}}
+                style={{backgroundColor: T.surface, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: retypeId === fd.id ? `${T.accent}60` : T.border}}>
+                <Text style={{fontSize: fs(12), color: T.muted}}>{typeLabel(fd.type)} ▾</Text>
+              </TouchableOpacity>
+            </View>
+            {retypeId === fd.id && (
+              <View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 8}}>
+                {FIELD_TYPES.map(ft => (
+                  <TouchableOpacity key={ft.type} activeOpacity={0.7}
+                    onPress={() => { save(fields.map(f => f.id === fd.id ? {...f, type: ft.type} : f)); setRetypeId(null); }}
+                    accessibilityRole="menuitem" accessibilityState={{selected: fd.type === ft.type}} accessibilityLabel={typeLabel(ft.type)}
+                    style={{paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, borderWidth: 1,
+                      backgroundColor: fd.type === ft.type ? T.accentBg : T.surface, borderColor: fd.type === ft.type ? `${T.accent}50` : T.border}}>
+                    <Text style={{fontSize: fs(11), color: fd.type === ft.type ? T.accent : T.dim}}>{typeLabel(ft.type)}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {(fd.type === 'text' || fd.type === 'markdown') && (
+              <TouchableOpacity onPress={() => toggleMarkdown(fd.id)} activeOpacity={0.7} accessibilityRole="checkbox" accessibilityState={{checked: !!fd.markdown}} accessibilityLabel={t('customFields.markdownSupport')} style={{flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 8}}>
+                <Text style={{fontSize: fs(16), color: fd.markdown ? T.accent : T.muted}} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{fd.markdown ? '☑' : '☐'}</Text>
+                <Text style={{fontSize: fs(12), color: T.dim}}>{t('customFields.markdownSupport')}</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        ))}
+      </KeyboardAwareScrollView>
+
+      <KeyboardStickyView style={{position: 'absolute', bottom: 0, left: 0, right: 0}}>
+      <View onLayout={onBarLayout} style={{backgroundColor: T.surface, borderTopWidth: 1, borderTopColor: T.border, padding: 12}}>
+        <View style={{flexDirection: 'row', gap: 8, alignItems: 'center'}}>
+          <TextInput value={newName} onChangeText={setNewName} accessibilityLabel={t('customFields.fieldName')} placeholder={t('customFields.fieldName')} placeholderTextColor={T.muted}
+            style={{flex: 1, backgroundColor: T.bg, color: T.text, borderWidth: 1, borderColor: T.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, fontSize: fs(13)}}
+            onSubmitEditing={addField} />
+          <TouchableOpacity onPress={() => setShowTypePicker(!showTypePicker)} activeOpacity={0.7}
+            accessibilityRole="button" accessibilityState={{expanded: showTypePicker}} accessibilityLabel={t('customFields.fieldType')} accessibilityValue={{text: typeLabel(newType)}}
+            style={{backgroundColor: T.bg, borderWidth: 1, borderColor: T.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 9}}>
+            <Text style={{fontSize: fs(12), color: T.dim}}>{typeLabel(newType)} ▾</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={addField} activeOpacity={0.7}
+            accessibilityRole="button" accessibilityLabel={t('common.add')}
+            style={{backgroundColor: T.accentBg, borderWidth: 1, borderColor: `${T.accent}40`, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 9}}>
+            <Text style={{fontSize: fs(13), fontWeight: '600', color: T.accent}}>+</Text>
+          </TouchableOpacity>
+        </View>
+
+        {showTypePicker && (
+          <ScrollView style={{maxHeight: 240, marginTop: 8}} keyboardShouldPersistTaps="handled"
+            contentContainerStyle={{backgroundColor: T.card, borderRadius: 10, borderWidth: 1, borderColor: T.border, overflow: 'hidden'}}>
+            {FIELD_TYPES.map(ft => (
+              <TouchableOpacity key={ft.type} onPress={() => {setNewType(ft.type); setShowTypePicker(false);}} activeOpacity={0.7}
+                accessibilityRole="menuitem" accessibilityState={{selected: newType === ft.type}} accessibilityLabel={typeLabel(ft.type)}
+                style={{flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.border,
+                  backgroundColor: newType === ft.type ? `${T.accent}15` : 'transparent'}}>
+                <Text style={{fontSize: fs(16), width: 24, textAlign: 'center'}} accessibilityElementsHidden importantForAccessibility="no-hide-descendants">{ft.icon}</Text>
+                <Text style={{fontSize: fs(13), color: newType === ft.type ? T.accent : T.text, fontWeight: newType === ft.type ? '600' : '400'}}>{typeLabel(ft.type)}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+      </KeyboardStickyView>
+    </View>
+  );
+};

@@ -1,0 +1,244 @@
+import React, {useState, useEffect} from 'react';
+import {View, ScrollView, TouchableOpacity, Alert} from 'react-native';
+import {KeyboardAvoidingView} from 'react-native-keyboard-controller';
+import {Text, TextInput} from '../components/AppText';
+import {useKeyboardBehavior} from '../hooks/useKeyboardBehavior';
+import {useTranslation} from 'react-i18next';
+import {Fonts, fontScale, ThemeColors} from '../theme';
+import {useAppStore} from '../store/appStore';
+import {Member, MemberPoll, PollOption, uid, fmtTime, sortMembersBySearch, memberMatchesSearch} from '../utils';
+import {store, KEYS} from '../storage';
+import {NetworkManager} from '../network/NetworkManager';
+
+interface Props {
+  theme: ThemeColors;
+}
+
+export const PollsScreen = ({theme: T}: Props) => {
+  const members = useAppStore(s => s.members);
+  const front = useAppStore(s => s.front);
+  const {t} = useTranslation();
+  const fs = fontScale(T);
+  const behavior = useKeyboardBehavior();
+  const activeMembers = members.filter(m => !m.archived && !m.isCustomFront && !m.isFacet);
+  const facetMembers = members.filter(m => !m.archived && !m.isCustomFront && m.isFacet);
+  const [polls, setPolls] = useState<MemberPoll[]>([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [question, setQuestion] = useState('');
+  const [options, setOptions] = useState(['', '']);
+  const [hideVoters, setHideVoters] = useState(false);
+  const [multiChoice, setMultiChoice] = useState(false);
+  const [voterId, setVoterId] = useState(() => {
+    const votable = new Set([...activeMembers, ...facetMembers].map(m => m.id));
+    const fronting = [
+      ...(front?.primary?.memberIds || []),
+      ...(front?.coFront?.memberIds || []),
+      ...(front?.coConscious?.memberIds || []),
+    ].find(id => votable.has(id));
+    return fronting || activeMembers[0]?.id || '';
+  });
+  const [voterPickerOpen, setVoterPickerOpen] = useState(false);
+  const [voterSearch, setVoterSearch] = useState('');
+
+  useEffect(() => {
+    const load = () => { store.get<MemberPoll[]>(KEYS.polls, []).then(p => setPolls(p || [])); };
+    load();
+    return NetworkManager.onSyncApplied(load);
+  }, []);
+
+  const savePolls = async (updated: MemberPoll[]) => {
+    setPolls(updated);
+    await store.set(KEYS.polls, updated);
+  };
+
+  const createPoll = () => {
+    if (!question.trim() || options.filter(o => o.trim()).length < 2) return;
+    const poll: MemberPoll = {
+      id: uid(), targetMemberId: voterId, question: question.trim(),
+      options: options.filter(o => o.trim()).map(o => ({id: uid(), label: o.trim(), votes: []})),
+      createdBy: voterId, createdAt: Date.now(), hideVoterNames: hideVoters || undefined,
+      multipleChoice: multiChoice || undefined,
+    };
+    savePolls([...polls, poll]);
+    setShowCreate(false); setQuestion(''); setOptions(['', '']); setHideVoters(false); setMultiChoice(false);
+  };
+
+  const vote = (pollId: string, optionId: string) => {
+    if (!voterId) return;
+    savePolls(polls.map(p => {
+      if (p.id !== pollId) return p;
+      if (p.multipleChoice) {
+        return {...p, options: p.options.map(o => o.id !== optionId ? o : {...o, votes: o.votes.includes(voterId) ? o.votes.filter(v => v !== voterId) : [...o.votes, voterId]})};
+      }
+      const alreadyVoted = p.options.some(o => o.id === optionId && o.votes.includes(voterId));
+      const opts = p.options.map(o => {
+        const without = o.votes.filter(v => v !== voterId);
+        return o.id === optionId && !alreadyVoted ? {...o, votes: [...without, voterId]} : {...o, votes: without};
+      });
+      return {...p, options: opts};
+    }));
+  };
+
+  const toggleClose = (pollId: string) => savePolls(polls.map(p => p.id === pollId ? {...p, closedAt: p.closedAt ? undefined : Date.now()} : p));
+
+  const deletePoll = (id: string) => {
+    Alert.alert(t('polls.deletePoll'), t('polls.deletePollMsg'), [
+      {text: t('common.cancel'), style: 'cancel'},
+      {text: t('common.delete'), style: 'destructive', onPress: () => savePolls(polls.filter(p => p.id !== id))},
+    ]);
+  };
+
+  const getName = (id: string) => members.find(m => m.id === id)?.name || '?';
+
+  return (
+    <KeyboardAvoidingView style={{flex: 1}} behavior={behavior}>
+      <View style={{flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingVertical: 10}}>
+        <Text style={{fontSize: fs(11), color: T.dim}}>{t('polls.votingAs')}</Text>
+        <TouchableOpacity onPress={() => setVoterPickerOpen(!voterPickerOpen)} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityState={{expanded: voterPickerOpen}} accessibilityLabel={t('polls.votingAs')} accessibilityValue={{text: getName(voterId)}}
+          style={{backgroundColor: T.surface, borderWidth: 1, borderColor: T.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6}}>
+          <Text style={{fontSize: fs(12), color: T.text}}>{getName(voterId)} ▾</Text>
+        </TouchableOpacity>
+        <View style={{flex: 1}} />
+        <TouchableOpacity onPress={() => setShowCreate(!showCreate)} activeOpacity={0.7}
+          accessibilityRole="button" accessibilityState={{expanded: showCreate}} accessibilityLabel={t('polls.createPoll')}
+          style={{backgroundColor: T.accentBg, borderWidth: 1, borderColor: `${T.accent}40`, borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8}}>
+          <Text style={{fontSize: fs(12), fontWeight: '600', color: T.accent}}>{t('polls.createPoll')}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {voterPickerOpen && (
+        <View style={{marginHorizontal: 16, backgroundColor: T.card, borderRadius: 10, borderWidth: 1, borderColor: T.border, marginBottom: 8}}>
+          <TextInput
+            value={voterSearch}
+            onChangeText={setVoterSearch}
+            accessibilityLabel={t('common.search')} placeholder={t('common.search')}
+            placeholderTextColor={T.muted}
+            autoFocus
+            style={{
+              backgroundColor: T.surface, color: T.text, fontSize: fs(13),
+              paddingHorizontal: 12, paddingVertical: 8,
+              borderBottomWidth: 1, borderBottomColor: T.border,
+              borderTopLeftRadius: 10, borderTopRightRadius: 10,
+            }}
+          />
+          <ScrollView style={{maxHeight: 220}} keyboardShouldPersistTaps="handled">
+            {(() => {
+              const q = voterSearch.trim().toLowerCase();
+              const match = (m: Member) => memberMatchesSearch(m, q);
+              const row = (m: Member) => (
+                <TouchableOpacity key={m.id} onPress={() => {setVoterId(m.id); setVoterPickerOpen(false); setVoterSearch('');}} activeOpacity={0.7}
+                  accessibilityRole="button" accessibilityLabel={m.name} accessibilityState={{selected: voterId === m.id}}
+                  style={{paddingHorizontal: 14, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: T.border,
+                    backgroundColor: voterId === m.id ? `${T.accent}15` : 'transparent'}}>
+                  <Text style={{fontSize: fs(13), color: voterId === m.id ? T.accent : T.text}}>{m.name}</Text>
+                </TouchableOpacity>
+              );
+              const facets = sortMembersBySearch(facetMembers.filter(match), voterSearch.trim());
+              const roster = sortMembersBySearch(activeMembers.filter(match), voterSearch.trim());
+              return (
+                <>
+                  {roster.length > 0 && (
+                    <Text accessibilityRole="header" style={{fontSize: fs(10), letterSpacing: 1, textTransform: 'uppercase', color: T.dim, fontWeight: '600', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4}}>{t('members.title')}</Text>
+                  )}
+                  {roster.map(row)}
+                  {facets.length > 0 && (
+                    <>
+                      <Text accessibilityRole="header" style={{fontSize: fs(10), letterSpacing: 1, textTransform: 'uppercase', color: T.dim, fontWeight: '600', paddingHorizontal: 14, paddingTop: 12, paddingBottom: 4}}>{t('members.facets')}</Text>
+                      {facets.map(row)}
+                    </>
+                  )}
+                </>
+              );
+            })()}
+          </ScrollView>
+        </View>
+      )}
+
+      {showCreate && (
+        <View style={{marginHorizontal: 16, marginBottom: 12, backgroundColor: T.card, borderRadius: 12, borderWidth: 1, borderColor: T.border, padding: 14}}>
+          <TextInput value={question} onChangeText={setQuestion} accessibilityLabel={t('polls.questionPlaceholder')} placeholder={t('polls.questionPlaceholder')} placeholderTextColor={T.muted}
+            style={{backgroundColor: T.surface, color: T.text, borderWidth: 1, borderColor: T.border, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 9, fontSize: fs(14), marginBottom: 10}} />
+          {options.map((opt, i) => (
+            <View key={i} style={{flexDirection: 'row', gap: 6, marginBottom: 6, alignItems: 'center'}}>
+              <TextInput value={opt} onChangeText={v => {const u = [...options]; u[i] = v; setOptions(u);}}
+                accessibilityLabel={t('polls.optionPlaceholder')} placeholder={`${t('polls.optionPlaceholder')} ${i + 1}`} placeholderTextColor={T.muted}
+                style={{flex: 1, backgroundColor: T.surface, color: T.text, borderWidth: 1, borderColor: T.border, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, fontSize: fs(13)}} />
+              {options.length > 2 && (
+                <TouchableOpacity onPress={() => setOptions(options.filter((_, j) => j !== i))} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={t('polls.removeOption')}>
+                  <Text style={{fontSize: fs(14), color: T.danger}}>✕</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          ))}
+          <TouchableOpacity onPress={() => setOptions([...options, ''])} activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={t('polls.addOption')} style={{paddingVertical: 6}}>
+            <Text style={{fontSize: fs(12), color: T.accent}}>{t('polls.addOption')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setMultiChoice(!multiChoice)} activeOpacity={0.7} accessibilityRole="checkbox" accessibilityState={{checked: multiChoice}} accessibilityLabel={t('polls.multipleChoice')} style={{flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6}}>
+            <Text style={{fontSize: fs(16), color: multiChoice ? T.accent : T.muted}}>{multiChoice ? '☑' : '☐'}</Text>
+            <Text style={{fontSize: fs(12), color: T.dim}}>{t('polls.multipleChoice')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => setHideVoters(!hideVoters)} activeOpacity={0.7} accessibilityRole="checkbox" accessibilityState={{checked: hideVoters}} accessibilityLabel={t('polls.hideVoters')} style={{flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6, marginBottom: 10}}>
+            <Text style={{fontSize: fs(16), color: hideVoters ? T.accent : T.muted}}>{hideVoters ? '☑' : '☐'}</Text>
+            <Text style={{fontSize: fs(12), color: T.dim}}>{t('polls.hideVoters')}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={createPoll} activeOpacity={0.7} accessibilityRole="button"
+            style={{backgroundColor: T.accentBg, borderWidth: 1, borderColor: `${T.accent}40`, borderRadius: 8, paddingVertical: 10, alignItems: 'center'}}>
+            <Text style={{fontSize: fs(13), fontWeight: '600', color: T.accent}}>{t('common.add')}</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <ScrollView style={{flex: 1}} contentContainerStyle={{padding: 16, paddingTop: 0}}>
+        {polls.length === 0 ? (
+          <View style={{alignItems: 'center', paddingVertical: 48}}>
+            <Text style={{fontSize: fs(13), color: T.dim}}>{t('polls.noPolls')}</Text>
+          </View>
+        ) : polls.map(poll => {
+          const voterCount = new Set(poll.options.flatMap(o => o.votes)).size;
+          const isClosed = !!poll.closedAt;
+          return (
+            <View key={poll.id} style={{backgroundColor: T.card, borderRadius: 12, borderWidth: 1, borderColor: T.border, padding: 14, marginBottom: 10}}>
+              <View style={{flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6}}>
+                <Text accessibilityRole="header" style={{flex: 1, fontSize: fs(15), fontWeight: '600', color: T.text}}>{poll.question}</Text>
+                {isClosed && <Text style={{fontSize: fs(10), color: T.danger, fontWeight: '600', textTransform: 'uppercase'}}>{t('polls.closed')}</Text>}
+              </View>
+              <Text style={{fontSize: fs(11), color: T.muted, marginBottom: 10}}>
+                {poll.hideVoterNames ? '' : `${getName(poll.createdBy)} · `}{fmtTime(poll.createdAt)} · {t('polls.votes', {count: voterCount})}{poll.multipleChoice ? ` · ${t('polls.multipleChoice')}` : ''}
+              </Text>
+
+              {poll.options.map(opt => {
+                const pct = voterCount > 0 ? Math.round((opt.votes.length / voterCount) * 100) : 0;
+                const voted = opt.votes.includes(voterId);
+                return (
+                  <TouchableOpacity key={opt.id} onPress={() => !isClosed && vote(poll.id, opt.id)} activeOpacity={isClosed ? 1 : 0.7}
+                    accessibilityRole={poll.multipleChoice ? 'checkbox' : 'button'} accessibilityLabel={`${opt.label}, ${pct}%`}
+                    accessibilityState={poll.multipleChoice ? {checked: voted, disabled: isClosed} : {selected: voted, disabled: isClosed}}
+                    style={{borderRadius: 8, borderWidth: 1, borderColor: voted ? T.accent : T.border, backgroundColor: T.surface, marginBottom: 6, overflow: 'hidden'}}>
+                    <View style={{position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pct}%`, backgroundColor: voted ? `${T.accent}55` : `${T.muted}45`}} />
+                    <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10}}>
+                      <Text style={{fontSize: fs(13), color: voted ? T.accent : T.text, fontWeight: voted ? '600' : '400'}}>{opt.label}</Text>
+                      <Text style={{fontSize: fs(12), color: T.muted}}>{pct}%</Text>
+                    </View>
+                    {!poll.hideVoterNames && opt.votes.length > 0 && (
+                      <Text style={{fontSize: fs(10), color: T.muted, paddingHorizontal: 12, paddingBottom: 6}}>{opt.votes.map(v => getName(v)).join(', ')}</Text>
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+
+              <View style={{flexDirection: 'row', gap: 12, marginTop: 6}}>
+                <TouchableOpacity onPress={() => toggleClose(poll.id)} activeOpacity={0.7} accessibilityRole="button">
+                  <Text style={{fontSize: fs(11), color: T.accent}}>{isClosed ? t('polls.reopenPoll') : t('polls.closePoll')}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={() => deletePoll(poll.id)} activeOpacity={0.7} accessibilityRole="button">
+                  <Text style={{fontSize: fs(11), color: T.danger}}>{t('polls.deletePoll')}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          );
+        })}
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+};

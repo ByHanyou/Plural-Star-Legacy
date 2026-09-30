@@ -1,0 +1,15 @@
+{
+  "extends": "@react-native/typescript-config",
+  "compilerOptions": {
+    "types": [],
+    "paths": {
+      "@lodev09/react-native-true-sheet": ["./legacy/true-sheet.tsx"],
+      "true-sheet-v2": ["./node_modules/@lodev09/react-native-true-sheet/lib/typescript/module/src/index.d.ts"],
+      "@shopify/flash-list": ["./legacy/flash-list.tsx"],
+      "flash-list-v1": ["./node_modules/@shopify/flash-list/dist/index.d.ts"],
+      "react-native-notify-kit": ["./legacy/notify-kit.ts"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.tsx"],
+  "exclude": ["**/node_modules", "**/Pods", "__tests__"]
+}
