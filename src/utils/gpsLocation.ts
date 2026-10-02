@@ -1,7 +1,9 @@
 import {Platform, PermissionsAndroid} from 'react-native';
+import Geolocation from '@react-native-community/geolocation';
 import i18n from '../i18n/i18n';
 
 const GPS_LOOKUP_MAX_MS = 15000;
+const NOMINATIM_USER_AGENT = 'PluralStar (https://github.com/ByHanyou/Plural-Star)';
 
 export const getGPSLocation = (): Promise<string | null> =>
   new Promise(async resolve => {
@@ -15,8 +17,6 @@ export const getGPSLocation = (): Promise<string | null> =>
     };
     guard = setTimeout(() => finish(null), GPS_LOOKUP_MAX_MS);
     try {
-      const geo = ((globalThis as any).navigator)?.geolocation;
-      if (!geo || typeof geo.getCurrentPosition !== 'function') {finish(null); return;}
       if (Platform.OS === 'android') {
         const granted = await PermissionsAndroid.request(
           PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
@@ -24,13 +24,13 @@ export const getGPSLocation = (): Promise<string | null> =>
         );
         if (granted !== PermissionsAndroid.RESULTS.GRANTED) {finish(null); return;}
       }
-      geo.getCurrentPosition(
-        async (pos: any) => {
+      Geolocation.getCurrentPosition(
+        async pos => {
           try {
             const {latitude, longitude} = pos.coords;
             const res = await fetch(
-              `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&zoom=10`,
-              {headers: {'User-Agent': 'PluralStar/1.9.0'}},
+              `https://nominatim.openstreetmap.org/reverse?lat=${latitude}&lon=${longitude}&format=json&zoom=14`,
+              {headers: {'User-Agent': NOMINATIM_USER_AGENT}},
             );
             const data = await res.json();
             const a = data.address || {};
@@ -39,7 +39,7 @@ export const getGPSLocation = (): Promise<string | null> =>
           } catch { finish(null); }
         },
         () => finish(null),
-        {timeout: 8000, maximumAge: 120000},
+        {enableHighAccuracy: false, timeout: 8000, maximumAge: 120000},
       );
     } catch { finish(null); }
   });

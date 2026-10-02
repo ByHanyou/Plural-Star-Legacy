@@ -6,7 +6,7 @@ import {getGPSLocation} from '../utils/gpsLocation';
 import {requestGPSPermission, requestFilesPermission} from '../utils/permissions';
 import {logError} from '../utils/log';
 import type {CustomPalette} from '../theme';
-import {migrateInlineChatMedia, rebaseChatMessageMedia} from '../utils/mediaUtils';
+import {migrateInlineChatMedia, rebaseChatMessageMedia, deleteAvatar} from '../utils/mediaUtils';
 import {setEmergencyNotificationInfo, rescheduleMedicationReminders, rescheduleAppointmentReminders, reschedulePlannerNotifications, showFrontNotification} from '../services/NotificationService';
 import {useAppStore} from './appStore';
 
@@ -94,9 +94,19 @@ export const saveShareSettings = async (d: ShareSettings) => {
 };
 
 export const saveGroups = async (d: MemberGroup[]) => {
-  const {loaded, setGroups} = useAppStore.getState();
+  const {loaded, setGroups, groups: previous, members, setMembers} = useAppStore.getState();
   if (!loaded && d.length === 0) return;
   setGroups(d); await store.set(KEYS.groups, d);
+  const kept = new Set(d.map(g => g.id));
+  const gone = new Set((previous || []).filter(g => !kept.has(g.id)).map(g => g.id));
+  if (gone.size === 0) return;
+  let changed = false;
+  const next = members.map(m => {
+    if (!m.groupIds || !m.groupIds.some(id => gone.has(id))) return m;
+    changed = true;
+    return {...m, groupIds: m.groupIds.filter(id => !gone.has(id))};
+  });
+  if (changed) { setMembers(next); await store.set(KEYS.members, next); }
 };
 
 export const savePalettes = async (d: CustomPalette[]) => {
@@ -331,8 +341,10 @@ export const removeFromFront = async (id: string) => {
 
 export const saveMember = async (m: Member) => {
   const {members} = useAppStore.getState();
-  const u = members.find(x => x.id === m.id) ? members.map(x => (x.id === m.id ? m : x)) : [...members, m];
+  const prev = members.find(x => x.id === m.id);
+  const u = prev ? members.map(x => (x.id === m.id ? m : x)) : [...members, m];
   await saveMembers(u);
+  if (prev?.avatar && !m.avatar) deleteAvatar(m.id).catch(e => logError('saveMember: avatar', e));
 };
 
 const forgetMemberLinks = async (id: string): Promise<void> => {
