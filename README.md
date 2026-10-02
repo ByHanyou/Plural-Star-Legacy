@@ -54,7 +54,7 @@ Everything Plural Star has. See the [Plural Star README](https://github.com/ByHa
 - Observatory Mode for the singlets in our lives
 - Member profiles with pictures, banners, markdown bios, tags, groups, Facets, Custom Fronts and the Archive
 - System Manager, Custom Fields, Mailbox, System Polls and the System Map
-- Friends & Syncing: end-to-end encrypted friends and linked devices
+- Friends & Syncing: end-to-end encrypted messages and linked devices (your current front status goes to the Plural Star gateway in the clear so friends can see it)
 - Cloud Services *(Experimental)*
 - Day Planner, Whiteboard, System Chat and the System Journal
 - Front and member history, retroactive entries and System Statistics
