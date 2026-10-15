@@ -19,11 +19,18 @@ export interface TrueSheetProps {
 
 const toSize = (d: Detent) => (d === 'auto' ? 'auto' : (`${Math.round(d * 100)}%` as `${number}%`));
 
+let pendingDismiss: Promise<void> | null = null;
+const DISMISS_SETTLE_MS = 1500;
+
 export class TrueSheet extends Component<TrueSheetProps> {
   private sheet = createRef<SheetV2>();
+  private settleDismiss: (() => void) | null = null;
 
   present(index?: number): Promise<void> {
-    return this.sheet.current ? this.sheet.current.present(index) : Promise.resolve();
+    const sheet = this.sheet.current;
+    if (!sheet) return Promise.resolve();
+    const wait = pendingDismiss || Promise.resolve();
+    return wait.then(() => sheet.present(index));
   }
 
   resize(index: number): Promise<void> {
@@ -31,7 +38,23 @@ export class TrueSheet extends Component<TrueSheetProps> {
   }
 
   dismiss(): Promise<void> {
-    return this.sheet.current ? this.sheet.current.dismiss() : Promise.resolve();
+    const sheet = this.sheet.current;
+    if (!sheet) return Promise.resolve();
+    let done: () => void = () => {};
+    const p = new Promise<void>(resolve => { done = resolve; });
+    const settle = () => {
+      if (pendingDismiss === p) pendingDismiss = null;
+      if (this.settleDismiss === settle) this.settleDismiss = null;
+      done();
+    };
+    this.settleDismiss = settle;
+    pendingDismiss = p;
+    setTimeout(settle, DISMISS_SETTLE_MS);
+    return sheet.dismiss();
+  }
+
+  componentWillUnmount() {
+    this.settleDismiss?.();
   }
 
   render() {
@@ -49,7 +72,7 @@ export class TrueSheet extends Component<TrueSheetProps> {
         edgeToEdge
         contentContainerStyle={s.fill}
         onPresent={() => onDidPresent?.()}
-        onDismiss={() => onDidDismiss?.()}>
+        onDismiss={() => { this.settleDismiss?.(); onDidDismiss?.(); }}>
         <View style={[s.fill, floor]}>
           {header}
           {children}

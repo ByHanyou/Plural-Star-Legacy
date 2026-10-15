@@ -2,6 +2,10 @@
   "extends": "@react-native/typescript-config",
   "compilerOptions": {
     "types": [],
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
     "paths": {
       "@lodev09/react-native-true-sheet": ["./legacy/true-sheet.tsx"],
       "true-sheet-v2": ["./node_modules/@lodev09/react-native-true-sheet/lib/typescript/module/src/index.d.ts"],

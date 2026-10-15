@@ -1,12 +1,13 @@
 {
   "name": "PSLegacy",
-  "version": "1.22.1",
+  "version": "1.23.0",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
     "start": "react-native start",
     "build-android-apk": "cd android && bash ./gradlew assembleRelease",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "jest",
     "postinstall": "patch-package"
   },
