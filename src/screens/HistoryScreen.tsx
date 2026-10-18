@@ -10,7 +10,6 @@ import {saveHistory} from '../store/actions';
 import {AccentText} from '../components/AccentText';
 import {HistoryEntry, JournalEntry, Member, FrontTierKey, fmtTime, fmtDate, fmtDur, fmtNum, translateMood, sortMembersBySearch, memberMatchesSearch, singletStatuses, buildEffectiveEnd} from '../utils';
 import {FlashList} from '@shopify/flash-list';
-// Legacy: FlashList 1.x has no useMappingHelper; plain keys are the v1 behaviour.
 const useMappingHelper = () => ({getMappingKey: (itemKey: string | number, _index: number) => itemKey});
 
 import {FrontTimeline} from '../components/FrontTimeline';
@@ -97,7 +96,6 @@ const FrontHistoryEntryRow = React.memo(function FrontHistoryEntryRow({
   const primaryFronters = singlet && withoutSelf.length === 0 ? allPrimary : withoutSelf;
   const coFrontMembers = (entry.coFrontIds || []).map(id => memberMap.get(id)).filter(Boolean) as Member[];
   const coConMembers = (entry.coConsciousIds || []).map(id => memberMap.get(id)).filter(Boolean) as Member[];
-  // A row with no primary fronter shows its co-front, else co-conscious, members instead of "Unknown" (same fallback as the notification title).
   const shownFronters = primaryFronters.length ? primaryFronters : coFrontMembers.length ? coFrontMembers : coConMembers;
   const displayEnd = entry.endTime ?? effectiveEnd;
   const isOpen = displayEnd === null;
@@ -255,7 +253,6 @@ export const HistoryScreen = ({theme: T, singlet = false, selfId, onEditEntry, r
   const onSaveHistory = saveHistory;
   const {t} = useTranslation();
   const fs = useCallback(fontScale(T), [T.textScale]);
-  // The edit callback from App is a new function on every render; the row renderer uses a stable one so the rows do not all re-render on each visit.
   const onEditEntryRef = useRef(onEditEntry);
   onEditEntryRef.current = onEditEntry;
   const editEntry = useCallback((originalIndex: number) => onEditEntryRef.current?.(originalIndex), []);
@@ -484,6 +481,7 @@ export const HistoryScreen = ({theme: T, singlet = false, selfId, onEditEntry, r
           data={deferredRows}
           keyExtractor={(item) => item.key}
           getItemType={(item) => item.kind}
+          estimatedItemSize={104}
           contentContainerStyle={{padding: 16, paddingBottom: 32}}
           ListEmptyComponent={
             <View style={{alignItems: 'center', paddingVertical: 48}}>
@@ -625,6 +623,7 @@ export const HistoryScreen = ({theme: T, singlet = false, selfId, onEditEntry, r
                 data={allMemberEvents}
                 keyExtractor={(event: any, i: number) => `${event.type}-${event.time}-${i}`}
                 getItemType={(event: any) => event.type === 'journal' ? 'journal' : 'entry'}
+                estimatedItemSize={73}
                 contentContainerStyle={{padding: 16, paddingTop: 8, paddingBottom: 32}}
                 ListEmptyComponent={
                   <View style={{alignItems: 'center', paddingVertical: 32}}>

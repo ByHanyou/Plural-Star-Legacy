@@ -213,6 +213,7 @@ export const FrontTimeline = ({T, history, members, singlet = false}: {
           data={rows}
           keyExtractor={r => r.member.id}
           renderItem={renderRow}
+          estimatedItemSize={ROW_H}
           contentContainerStyle={{paddingBottom: 32}}
         />
       )}

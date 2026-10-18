@@ -30,8 +30,8 @@ android {
         applicationId "com.pluralspace.app.legacy"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 86
-        versionName "1.23.0"
+        versionCode 87
+        versionName "1.23.1"
     }
 
     signingConfigs {

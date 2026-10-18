@@ -1,6 +1,6 @@
 {
   "name": "PSLegacy",
-  "version": "1.23.0",
+  "version": "1.23.1",
   "private": true,
   "scripts": {
     "android": "react-native run-android",
@@ -8,6 +8,7 @@
     "build-android-apk": "cd android && bash ./gradlew assembleRelease",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
+    "audit:check": "node scripts/audit-check.js",
     "test": "jest",
     "postinstall": "patch-package"
   },
@@ -28,6 +29,7 @@
     "react": "19.1.4",
     "react-i18next": "^17.0.11",
     "react-native": "0.81.6",
+    "react-native-argon2": "^4.0.0",
     "react-native-blob-util": "0.24.10",
     "react-native-get-random-values": "2.0.0",
     "react-native-image-picker": "8.2.1",
@@ -64,5 +66,10 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "overrides": {
+    "@istanbuljs/load-nyc-config": {
+      "js-yaml": "^4.3.2"
+    }
   }
 }
