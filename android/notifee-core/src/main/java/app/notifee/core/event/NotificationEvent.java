@@ -75,9 +75,9 @@ public class NotificationEvent {
     eventDetailMap.put("notification", ObjectUtils.bundleToMap(notification.toBundle()));
 
     if (extras != null) {
-      Bundle pressAction = extras.getBundle("press_action");
+      Bundle pressAction = extras.getBundle("pressAction");
       if (pressAction != null) {
-        eventDetailMap.put("press_action", ObjectUtils.bundleToMap(pressAction));
+        eventDetailMap.put("pressAction", ObjectUtils.bundleToMap(pressAction));
       }
 
       String input = extras.getString("input");

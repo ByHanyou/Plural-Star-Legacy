@@ -50,7 +50,7 @@ import java.util.concurrent.Executors;
 public class Notifee {
   private static final String TAG = "API";
   private static Notifee mNotifee = null;
-  private static boolean mIsnitialized = false;
+  private static boolean mIsInitialized = false;
 
   private static final ExecutorService executorService = Executors.newCachedThreadPool();
   private static final ListeningExecutorService lExecutorService =
@@ -65,7 +65,7 @@ public class Notifee {
 
   @KeepForSdk
   public static Notifee getInstance() {
-    if (!mIsnitialized) {
+    if (!mIsInitialized) {
       Logger.w(TAG, "getInstance() accessed before event listener is initialized");
       mNotifee = new Notifee();
     }
@@ -81,7 +81,7 @@ public class Notifee {
   @KeepForSdk
   public static void initialize(@Nullable EventListener eventListener) {
     synchronized (Notifee.class) {
-      if (mIsnitialized) {
+      if (mIsInitialized) {
         return;
       }
 
@@ -93,7 +93,7 @@ public class Notifee {
         EventSubscriber.register(eventListener);
       }
 
-      mIsnitialized = true;
+      mIsInitialized = true;
     }
   }
 
@@ -108,11 +108,6 @@ public class Notifee {
     return event.getMainComponent();
   }
 
-  /**
-   * NOTE: Allow cancelling notifications even if the license is invalid.
-   *
-   * @param result
-   */
   @KeepForSdk
   public void cancelAllNotifications(int notificationType, MethodCallResult<Void> result) {
     Futures.addCallback(
@@ -441,7 +436,6 @@ public class Notifee {
       return;
     } else if (activity != null) {
       try {
-        // get intent from current activity
         Intent intent = activity.getIntent();
         if (intent != null && intent.getExtras() != null && intent.hasExtra("notification")) {
           initialNotificationBundle.putBundle(
@@ -454,7 +448,6 @@ public class Notifee {
       }
     }
 
-    // If no initial notification, return
     result.onComplete(null, null);
   }
 
@@ -491,12 +484,12 @@ public class Notifee {
 
     Bundle notificationSettingsBundle = new Bundle();
     if (areNotificationsEnabled) {
-      notificationSettingsBundle.putInt("authorizationStatus", 1); // AUTHORIZED
+      notificationSettingsBundle.putInt("authorizationStatus", 1);
     } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
         && !Preferences.getSharedInstance().getBooleanValue("permission_requested", false)) {
-      notificationSettingsBundle.putInt("authorizationStatus", -1); // NOT_DETERMINED
+      notificationSettingsBundle.putInt("authorizationStatus", -1);
     } else {
-      notificationSettingsBundle.putInt("authorizationStatus", 0); // DENIED
+      notificationSettingsBundle.putInt("authorizationStatus", 0);
     }
 
     boolean canScheduleExactAlarms = AlarmUtils.canScheduleExactAlarms();

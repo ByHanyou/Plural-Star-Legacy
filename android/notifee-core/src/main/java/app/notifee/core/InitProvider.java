@@ -70,10 +70,6 @@ public class InitProvider extends ContentProvider {
         if (isWarmupEnabled(appContext)) {
           dispatchWarmup(appContext);
         }
-        // Fix for upstream invertase/notifee#734: recover scheduled alarms on every app init
-        // when a reboot has occurred since the last run. Runs unconditionally (not gated by
-        // the warmup metadata flag) because this is recovery, not optimisation. Always on a
-        // background thread to keep app startup clean.
         dispatchBootCheck(appContext);
       }
     } finally {
@@ -109,10 +105,6 @@ public class InitProvider extends ContentProvider {
     executor.shutdown();
   }
 
-  /**
-   * Dispatches the BOOT_COUNT cold-start recovery check on a background thread. Mirrors {@link
-   * #dispatchWarmup} so that app startup stays free of I/O. Fix for upstream invertase/notifee#734.
-   */
   private static void dispatchBootCheck(final Context context) {
     ExecutorService executor =
         Executors.newSingleThreadExecutor(
@@ -127,16 +119,6 @@ public class InitProvider extends ContentProvider {
     executor.shutdown();
   }
 
-  /**
-   * Reads {@code Settings.Global.BOOT_COUNT} and compares it against the last-known value stored in
-   * {@link Preferences}. If a reboot has occurred since the last app run — or if BOOT_COUNT cannot
-   * be read (custom ROMs, emulators, exotic vendors) — invokes {@link
-   * NotifeeAlarmManager#rescheduleNotifications(android.content.BroadcastReceiver.PendingResult)}
-   * to recover any AlarmManager triggers that may not have been re-armed by {@code
-   * RebootBroadcastReceiver} on OEM devices that suppress {@code BOOT_COMPLETED}.
-   *
-   * <p>Package-private for direct invocation from Robolectric unit tests.
-   */
   static void runBootCheck(Context context) {
     try {
       int currentBootCount = readBootCount(context);
@@ -161,8 +143,6 @@ public class InitProvider extends ContentProvider {
                 + "), rescheduling");
       }
 
-      // Only persist real values. Writing -1 would erase a prior real baseline
-      // and cause every subsequent init to run a conservative reschedule.
       if (currentBootCount != -1) {
         Preferences.getSharedInstance()
             .setIntValue(Preferences.LAST_KNOWN_BOOT_COUNT_KEY, currentBootCount);
@@ -185,17 +165,6 @@ public class InitProvider extends ContentProvider {
     }
   }
 
-  /**
-   * Pure decision function for BOOT_COUNT-based cold-start recovery. Returns {@code true} when the
-   * current init should trigger a reschedule pass, {@code false} otherwise.
-   *
-   * <ul>
-   *   <li>{@code currentBootCount == -1} → BOOT_COUNT unavailable; reschedule conservatively.
-   *   <li>{@code lastKnownBootCount == -1} → first run; record baseline without rescheduling.
-   *   <li>{@code currentBootCount != lastKnownBootCount} → reboot detected; reschedule.
-   *   <li>Otherwise → same boot as last run; no-op.
-   * </ul>
-   */
   @VisibleForTesting
   static boolean shouldRescheduleAfterBoot(int currentBootCount, int lastKnownBootCount) {
     if (currentBootCount == -1) {

@@ -45,11 +45,8 @@ public class ObjectUtils {
     try {
       classInstance = clazz.getConstructors()[0].newInstance();
     } catch (IllegalAccessException e) {
-      // noop
     } catch (InstantiationException e) {
-      // noop
     } catch (InvocationTargetException e) {
-      // noop
     }
     return classInstance;
   }
@@ -75,16 +72,16 @@ public class ObjectUtils {
       return 0;
     }
 
-    if (value instanceof Double) {
-      return (int) ((Double) value).doubleValue();
+    if (value instanceof Number) {
+      return ((Number) value).intValue();
     }
 
     return (int) value;
   }
 
   public static long getLong(Object value) {
-    if (value instanceof Double) {
-      return (long) ((Double) value).doubleValue();
+    if (value instanceof Number) {
+      return ((Number) value).longValue();
     }
 
     return (long) value;

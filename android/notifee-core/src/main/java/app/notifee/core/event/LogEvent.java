@@ -47,11 +47,6 @@ public class LogEvent {
     this.throwable = throwable;
   }
 
-  /**
-   * Logging TAG, used for filtering purposes.
-   *
-   * @return String
-   */
   @KeepForSdk
   public String getTag() {
     return tag;

@@ -105,8 +105,6 @@ public class BlockStateBroadcastReceiver extends BroadcastReceiver {
       return;
     }
 
-    // To prevent a race condition
-    // See https://github.com/notifee/react-native-notifee/issues/237
     if (ContextHolder.getApplicationContext() == null) {
       ContextHolder.setApplicationContext(context.getApplicationContext());
     }
@@ -140,14 +138,11 @@ public class BlockStateBroadcastReceiver extends BroadcastReceiver {
     workDataBuilder.putBoolean(
         KEY_BLOCKED, intent.getBooleanExtra(NotificationManager.EXTRA_BLOCKED_STATE, false));
 
-    // a second delay to debounce events coming from a user spam toggling block states
     OneTimeWorkRequest.Builder builder =
         new OneTimeWorkRequest.Builder(Worker.class)
             .setInitialDelay(1, TimeUnit.SECONDS)
             .setInputData(workDataBuilder.build());
 
-    // On-going issue with WorkManager.getInstance(context)
-    // https://issuetracker.google.com/issues/135858602
     try {
       WorkManager.getInstance(ContextHolder.getApplicationContext())
           .enqueueUniqueWork(uniqueWorkId, ExistingWorkPolicy.REPLACE, builder.build());

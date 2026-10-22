@@ -83,7 +83,7 @@ public class ChannelManager {
                   Logger.w(
                       TAG,
                       "Unable to retrieve sound for channel, sound was specified as: "
-                          + channel.getSound());
+                          + channelModel.getSound());
                 }
               } else {
                 channel.setSound(null, null);
@@ -266,12 +266,10 @@ public class ChannelManager {
     channelBundle.putBoolean("badge", channel.canShowBadge());
     channelBundle.putBoolean("bypassDnd", channel.canBypassDnd());
 
-    // can be null, don't include if null
     if (channel.getDescription() != null) {
       channelBundle.putString("description", channel.getDescription());
     }
 
-    // can be null, don't include if null
     if (channel.getGroup() != null) {
       channelBundle.putString("groupId", channel.getGroup());
     }
@@ -281,26 +279,21 @@ public class ChannelManager {
     channelBundle.putBoolean("vibration", channel.shouldVibrate());
     channelBundle.putBoolean("blocked", channel.getImportance() == IMPORTANCE_NONE);
 
-    // can be null, don't include if null
     if (channel.getSound() != null) {
       channelBundle.putString("soundURI", channel.getSound().toString());
-      // try to parse uri
       String soundValue = ResourceUtils.getSoundName(channel.getSound());
       if (soundValue != null) channelBundle.putString("sound", soundValue);
     }
 
-    // optional, can be 0
     if (channel.getLightColor() != 0) {
       channelBundle.putString("lightColor", ColorUtils.getColorString(channel.getLightColor()));
     }
 
-    // getVibrationPattern can be null
     long[] vibrationPattern = channel.getVibrationPattern();
 
     if (vibrationPattern != null && vibrationPattern.length > 0) {
       try {
         int[] convertedVibrationPattern = new int[vibrationPattern.length];
-        // cast to int array
         for (int i = 0; i < vibrationPattern.length; i++) {
           convertedVibrationPattern[i] = (int) vibrationPattern[i];
         }
@@ -311,9 +304,8 @@ public class ChannelManager {
       }
     }
 
-    // Unless the user manually changes this in app settings, it is always -1000.
     int visibility = channel.getLockscreenVisibility();
-    if (visibility != -1000) { // -1000 = not set
+    if (visibility != -1000) {
       channelBundle.putInt("visibility", visibility);
     }
 

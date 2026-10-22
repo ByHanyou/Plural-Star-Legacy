@@ -14,6 +14,7 @@ def keystorePropsFile = file("../../../PluralStar/android/keystore.properties")
 if (keystorePropsFile.exists()) {
     keystoreProps.load(new FileInputStream(keystorePropsFile))
 }
+def signingSecret = { String name -> keystoreProps[name] ?: (project.findProperty(name) ?: '') }
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -30,8 +31,8 @@ android {
         applicationId "com.pluralspace.app.legacy"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 87
-        versionName "1.23.1"
+        versionCode 88
+        versionName "1.23.2"
     }
 
     signingConfigs {
@@ -43,14 +44,15 @@ android {
         }
         release {
             storeFile file('../../../PluralStar/plural-space.keystore')
-            storePassword keystoreProps['PLURALSPACE_STORE_PASSWORD'] ?: (project.findProperty('PLURALSPACE_STORE_PASSWORD') ?: '')
+            storePassword signingSecret('PLURALSPACE_STORE_PASSWORD')
             keyAlias 'pluralspace'
-            keyPassword keystoreProps['PLURALSPACE_KEY_PASSWORD'] ?: (project.findProperty('PLURALSPACE_KEY_PASSWORD') ?: '')
+            keyPassword signingSecret('PLURALSPACE_KEY_PASSWORD')
         }
     }
 
     buildTypes {
         debug {
+            applicationIdSuffix ".debug"
             signingConfig signingConfigs.debug
         }
         release {
@@ -71,7 +73,7 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("com.facebook.fresco:animated-gif:3.6.0")
-    implementation("androidx.activity:activity:1.9.+")
+    implementation("androidx.activity:activity:1.9.3")
 
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")

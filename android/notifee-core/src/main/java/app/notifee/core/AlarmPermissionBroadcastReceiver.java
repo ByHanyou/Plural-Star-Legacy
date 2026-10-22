@@ -16,7 +16,6 @@ public class AlarmPermissionBroadcastReceiver extends BroadcastReceiver {
     }
 
     PendingResult pendingResult = goAsync();
-    // See RebootBroadcastReceiver for the rationale behind this guard.
     boolean asyncHandoffSucceeded = false;
     try {
       Logger.i(TAG, "Received alarm permission state changed event");

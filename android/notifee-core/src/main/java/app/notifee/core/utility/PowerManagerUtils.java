@@ -50,11 +50,6 @@ public class PowerManagerUtils {
     }
   }
 
-  /**
-   * Attempts to open the device's battery optimization settings
-   *
-   * @param activity
-   */
   public static void openBatteryOptimizationSettings(Activity activity) {
     try {
       Intent intent = new Intent();
@@ -69,24 +64,11 @@ public class PowerManagerUtils {
     }
   }
 
-  /**
-   * Returns true if the app has battery optimization enabled
-   *
-   * @param context
-   */
   public static Boolean isBatteryOptimizationEnabled(Context context) {
     PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
     return !pm.isIgnoringBatteryOptimizations(context.getPackageName());
   }
 
-  /**
-   * Lights up the screen if it is not already lit
-   *
-   * @param context
-   */
-  // FULL_WAKE_LOCK and ON_AFTER_RELEASE are deprecated since API 17, but there is no
-  // non-deprecated wake lock flag that can light up the screen from a Service/BroadcastReceiver
-  // context. WindowManager.FLAG_KEEP_SCREEN_ON requires an Activity.
   @SuppressWarnings("deprecation")
   public static void lightUpScreenIfNeeded(Context context) {
     PowerManager pm = (PowerManager) context.getSystemService(Context.POWER_SERVICE);
@@ -107,11 +89,6 @@ public class PowerManagerUtils {
     }
   }
 
-  /**
-   * Retrieves information about the device and its Power Manager Settings
-   *
-   * @return PowerManagerInfo
-   */
   public static PowerManagerInfo getPowerManagerInfo() {
     String activityName;
 
@@ -123,11 +100,6 @@ public class PowerManagerUtils {
     return result;
   }
 
-  /**
-   * Attempts to open the device's Power Manager settings
-   *
-   * @param activity
-   */
   public static void openPowerManagerSettings(Activity activity) {
     if (activity == null) {
       Logger.w(TAG, "Activity is null when trying to open the device's power manager");

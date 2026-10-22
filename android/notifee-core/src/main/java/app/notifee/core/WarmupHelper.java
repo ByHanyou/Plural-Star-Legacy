@@ -21,17 +21,6 @@ import android.content.Context;
 import android.os.Trace;
 import androidx.core.app.NotificationManagerCompat;
 
-/**
- * Encapsulates the foreground-service warmup logic so it can be called from both {@link
- * InitProvider} (automatic, at app startup) and the JS bridge ({@code prewarmForegroundService()},
- * on-demand).
- *
- * <p>This class runs <b>synchronously</b> on the caller's thread. Callers are responsible for
- * choosing the appropriate thread/executor.
- *
- * <p>Safe to call multiple times (idempotent). After the first call, class loading is a no-op from
- * ART's perspective and the Binder proxy call is cheap.
- */
 @KeepForSdk
 public final class WarmupHelper {
 
@@ -49,20 +38,12 @@ public final class WarmupHelper {
 
   private WarmupHelper() {}
 
-  /**
-   * Pre-loads critical foreground-service classes and warms the INotificationManager Binder proxy.
-   * Runs synchronously on the caller's thread.
-   *
-   * @param context Application context used for class loading and Binder warmup.
-   */
   @KeepForSdk
   public static void runWarmup(Context context) {
     Trace.beginSection("notifee:warmup");
     try {
       ClassLoader classLoader = context.getClassLoader();
 
-      // Pre-load critical foreground service classes to move ART class loading/verification
-      // cost from the first displayNotification() call to whenever the caller chooses.
       for (String className : WARMUP_CLASSES) {
         try {
           Class.forName(className, true, classLoader);
@@ -71,7 +52,6 @@ public final class WarmupHelper {
         }
       }
 
-      // Pre-warm INotificationManager Binder proxy by touching NotificationManagerCompat.
       try {
         NotificationManagerCompat.from(context).getNotificationChannels();
       } catch (Exception e) {

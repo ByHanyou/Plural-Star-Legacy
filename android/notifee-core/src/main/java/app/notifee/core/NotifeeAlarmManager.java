@@ -63,46 +63,14 @@ class NotifeeAlarmManager {
   private static final ListeningExecutorService alarmManagerListeningExecutor =
       MoreExecutors.listeningDecorator(alarmManagerExecutor);
 
-  /**
-   * Grace period for stale non-repeating triggers discovered during reboot recovery. Within this
-   * window the trigger is fired once and the Room row is deleted; beyond it the row is deleted
-   * silently to avoid showing stale content. Fix for upstream invertase/notifee#734: on OEM devices
-   * (MIUI, ColorOS, EMUI, FuntouchOS) that suppress BOOT_COMPLETED, zombie rows would otherwise
-   * re-fire on every reboot and never be cleaned.
-   */
   private static final long STALE_TRIGGER_GRACE_PERIOD_MS = TimeUnit.HOURS.toMillis(24);
 
-  /**
-   * Process-wide guard against concurrent reschedule passes. Set via {@code compareAndSet} at the
-   * entry of {@link #rescheduleNotifications} and cleared on every terminal path. Prevents the
-   * double-advancement race that would occur if {@code RebootBroadcastReceiver} (triggered by
-   * BOOT_COMPLETED) and {@code InitProvider} (triggered by the BOOT_COUNT cold-start recovery added
-   * for upstream invertase/notifee#734) both ran {@code rescheduleNotifications} in parallel: for
-   * past-timestamp repeating triggers, {@code setNextTimestamp} advances the anchor in-place, so
-   * two concurrent passes would skip a full period. Duplicate concurrent requests are logged and
-   * dropped — the winning pass owns the reschedule cycle to completion.
-   */
   private static final AtomicBoolean rescheduleInProgress = new AtomicBoolean(false);
 
-  // Scheduler used only as the timeout clock for Futures.withTimeout on Room
-  // writes happening inside BroadcastReceiver.goAsync() scopes. Broadcasts have
-  // ~10s before Android kills the process, so we cap the Room wait at 8s and
-  // call pendingResult.finish() anyway on timeout to avoid ANRs.
   private static final ScheduledExecutorService TIMEOUT_SCHEDULER =
       Executors.newSingleThreadScheduledExecutor();
   private static final long RECEIVER_WRITE_TIMEOUT_SECONDS = 8;
 
-  /**
-   * Wraps {@code future} in a {@link Futures#withTimeout} safety net and arranges for {@code
-   * pendingResult.finish()} to be called exactly once — on success, on failure, or on timeout. Use
-   * from a {@link BroadcastReceiver#goAsync} scope where the receiver must tell Android "I'm done"
-   * within ~10s or the process is killed. Timeouts are logged at {@code WARN} with the supplied
-   * {@code logContext}; real failures at {@code ERROR}.
-   *
-   * <p>If {@code beforeFinish} is non-null it is executed immediately before {@code
-   * pendingResult.finish()} on both the success and failure paths. Callers use this hook to release
-   * any process-wide state they acquired before dispatching (e.g. the reschedule lock).
-   */
   private static void finishReceiverWhenDone(
       @NonNull ListenableFuture<?> future,
       @Nullable BroadcastReceiver.PendingResult pendingResult,
@@ -167,13 +135,6 @@ class NotifeeAlarmManager {
 
     WorkDataRepository workDataRepository = new WorkDataRepository(getApplicationContext());
 
-    // Chain: read → display → persist (update for repeat / delete for one-shot).
-    // The final Room write is awaited before pendingResult.finish() so the
-    // BroadcastReceiver only tells Android "I'm done" once the next-fire anchor
-    // (or the deletion) has actually landed in Room. Without this, process death
-    // between finish() and the enqueued write could lose the updated timestamp
-    // and cause the same alarm to fire again on the next reboot. See #549 audit
-    // callers #6 and #7.
     ListenableFuture<Void> displayAndPersistFuture =
         Futures.transformAsync(
             workDataRepository.getWorkDataById(id),
@@ -200,8 +161,6 @@ class NotifeeAlarmManager {
                             != -1) {
                       TimestampTriggerModel trigger =
                           TimestampTriggerModel.fromBundle(triggerBundle);
-                      // scheduleTimestampTriggerNotification() calls setNextTimestamp()
-                      // internally, so we must NOT call it here to avoid double-advancing
                       scheduleTimestampTriggerNotification(notificationModel, trigger);
                       return WorkDataRepository.getInstance(getApplicationContext())
                           .update(
@@ -211,15 +170,12 @@ class NotifeeAlarmManager {
                                   ObjectUtils.bundleToBytes(trigger.toBundle()),
                                   true));
                     }
-                    // not repeating, delete database entry if work is a one-time request
                     return WorkDataRepository.getInstance(getApplicationContext()).deleteById(id);
                   },
                   alarmManagerExecutor);
             },
             alarmManagerExecutor);
 
-    // Awaits the Room write before pendingResult.finish(), bounded by the 8s
-    // ANR safety timeout. Handles success, failure, and timeout uniformly.
     finishReceiverWhenDone(
         displayAndPersistFuture, pendingResult, null, "displayScheduledNotification[" + id + "]");
   }
@@ -257,10 +213,8 @@ class NotifeeAlarmManager {
 
     TimestampTriggerModel.AlarmType alarmType = timestampTrigger.getAlarmType();
 
-    // Verify we can call setExact APIs to avoid a crash, but it requires an Android S+ symbol
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
 
-      // Check whether the alarmType is the exact alarm
       boolean isExactAlarm =
           Arrays.asList(
                   TimestampTriggerModel.AlarmType.SET_EXACT,
@@ -277,7 +231,6 @@ class NotifeeAlarmManager {
       }
     }
 
-    // Ensure timestamp is always in the future when scheduling the alarm
     timestampTrigger.setNextTimestamp();
 
     try {
@@ -307,14 +260,6 @@ class NotifeeAlarmManager {
               pendingIntent);
           break;
         case SET_ALARM_CLOCK:
-          // Build the "show intent" required by AlarmClockInfo — the PendingIntent Android
-          // fires when the user taps the alarm-clock icon rendered in the status bar while
-          // this alarm is pending. Reuse NotificationPendingIntent.createIntent so the tap
-          // funnels through the same NotificationReceiverActivity → onForegroundEvent path
-          // as a normal notification tap, honouring any custom pressAction.launchActivity /
-          // mainComponent the user configured. Building a getLaunchIntentForPackage ad-hoc
-          // (as the upstream PR #749 did) bypasses the pressAction fixes added in 9.1.19 /
-          // 9.3.0 and strands custom routing.
           Bundle showIntentPressAction = buildShowIntentPressActionBundle(notificationModel);
           PendingIntent pendingLaunchIntent =
               NotificationPendingIntent.createIntent(
@@ -341,25 +286,6 @@ class NotifeeAlarmManager {
     }
   }
 
-  /**
-   * Resolve the pressAction bundle used to build the AlarmClockInfo show intent for {@link
-   * TimestampTriggerModel.AlarmType#SET_ALARM_CLOCK}. Mirrors the three-case logic in {@code
-   * NotificationManager.displayNotification} so the status-bar alarm-clock icon, when tapped, goes
-   * through the same {@code NotificationReceiverActivity} path as a normal tap:
-   *
-   * <ol>
-   *   <li>pressAction absent → synthesize default {@code { id:'default', launchActivity:'default'
-   *       }} so the tap opens the app (defense-in-depth for triggers rehydrated from Room after an
-   *       app kill, which lose their pressAction bundle).
-   *   <li>pressAction carries the {@link NotificationPendingIntent#PRESS_ACTION_OPT_OUT_ID}
-   *       sentinel (user passed {@code pressAction: null} in JS) → still synthesize the default.
-   *       Unlike a content intent, the status-bar alarm-clock icon has no "non-tappable" mode —
-   *       Android requires a non-null show intent. Opening the launcher is the least-surprising
-   *       fallback and matches stock Clock app behaviour.
-   *   <li>pressAction is a normal bundle → pass through unchanged so custom {@code launchActivity}
-   *       / {@code mainComponent} routing is honoured.
-   * </ol>
-   */
   @VisibleForTesting
   static Bundle buildShowIntentPressActionBundle(NotificationModel notificationModel) {
     NotificationAndroidModel androidModel = notificationModel.getAndroid();
@@ -405,15 +331,6 @@ class NotifeeAlarmManager {
             alarmManagerListeningExecutor);
   }
 
-  /**
-   * On reboot, reschedule one trigger notification created via alarm manager.
-   *
-   * <p>Returns a future that completes when Room has persisted the updated next-fire anchor. The
-   * caller MUST await this future before calling {@code pendingResult.finish()} — otherwise Android
-   * may kill the boot receiver's process before Room has drained, and the next reboot will
-   * reschedule from the stale anchor. This bug is NOT in upstream invertase/notifee#549 and was
-   * surfaced only by the pre-fix-549-audit.md read-only caller audit (Caller #8).
-   */
   ListenableFuture<Void> rescheduleNotification(WorkDataEntity workDataEntity) {
     if (workDataEntity.getNotification() == null || workDataEntity.getTrigger() == null) {
       return Futures.immediateFuture(null);
@@ -442,7 +359,6 @@ class NotifeeAlarmManager {
         }
 
         scheduleTimestampTriggerNotification(notificationModel, trigger);
-        // Persist updated timestamp so next reboot starts from the correct anchor.
         return WorkDataRepository.getInstance(getApplicationContext())
             .update(
                 new WorkDataEntity(
@@ -450,29 +366,11 @@ class NotifeeAlarmManager {
                     workDataEntity.getNotification(),
                     ObjectUtils.bundleToBytes(trigger.toBundle()),
                     workDataEntity.getWithAlarmManager()));
-      case 1:
-        // TODO: support interval triggers with alarm manager
-        return Futures.immediateFuture(null);
       default:
         return Futures.immediateFuture(null);
     }
   }
 
-  /**
-   * Handles a stale non-repeating TIMESTAMP trigger found during reboot recovery. A trigger is
-   * "stale" when its {@code repeatFrequency} is {@code null} (one-shot) and its {@code timestamp}
-   * has already passed. Returns a {@link ListenableFuture} describing the stale-handling action, or
-   * {@code null} if the trigger is not stale and the caller should proceed with normal re-arming.
-   *
-   * <p>Within {@link #STALE_TRIGGER_GRACE_PERIOD_MS} of the original fire time the notification is
-   * fired once (late) and the Room row is deleted; beyond the grace period the row is deleted
-   * silently. In both cases the row is removed, preventing the zombie re-fire loop described in
-   * upstream invertase/notifee#734.
-   *
-   * <p>Package-private (not {@code private}) so that {@code NotifeeAlarmManagerHandleStaleTest} in
-   * {@code src/test/java/app/notifee/core/} can exercise the resilient display → delete chain via
-   * the {@code (..., Executor)} overload with {@code MoreExecutors.directExecutor()}.
-   */
   @Nullable
   static ListenableFuture<Void> handleStaleNonRepeatingTrigger(
       NotificationModel notificationModel, TimestampTriggerModel trigger) {
@@ -480,15 +378,6 @@ class NotifeeAlarmManager {
         notificationModel, trigger, alarmManagerListeningExecutor);
   }
 
-  /**
-   * Testable overload of {@link #handleStaleNonRepeatingTrigger(NotificationModel,
-   * TimestampTriggerModel)} that accepts the {@link Executor} used for the resilient display →
-   * delete chain. Production callers use the no-executor overload which delegates with the
-   * cached-thread-pool listening executor. Unit tests pass {@code
-   * com.google.common.util.concurrent.MoreExecutors.directExecutor()} so that Mockito's
-   * thread-local {@code mockStatic} intercepts fire on the calling thread instead of a worker
-   * thread where the stubs are inactive.
-   */
   @VisibleForTesting
   @Nullable
   static ListenableFuture<Void> handleStaleNonRepeatingTrigger(
@@ -525,37 +414,6 @@ class NotifeeAlarmManager {
             + "ms): "
             + id);
 
-    // Critical: even if the late-fire fails — because the target notification
-    // channel has been deleted between scheduling and recovery, because the
-    // serialized NotificationModel was written by an older library version
-    // whose shape differs, or because displayNotification throws for any other
-    // reason — we MUST still delete the Room row. Otherwise the zombie re-fire
-    // loop this helper is supposed to break persists across future reboots,
-    // exactly the scenario #734 is about. The within-grace path promises
-    // "attempt to fire, always clean"; the fire-once is best-effort, the delete
-    // is the correctness guarantee. Discovered via the Step 6 smoke dry-run,
-    // which surfaced a NullPointerException in NotificationAndroidModel.getChannelId
-    // and observed the chained deleteById never running.
-    //
-    // Post-Step-6 code review (Step 7) hardened the chain against two further
-    // failure modes the original catchingAsync missed:
-    //
-    //   1. Sync throws from NotificationManager.displayNotification (e.g. an
-    //      NPE from NotificationModel.getAndroid() before the work Callable is
-    //      even constructed) would bypass catchingAsync entirely, because the
-    //      primary input future to catchingAsync did not yet exist. Wrapping
-    //      the call in Futures.submitAsync converts any sync throw from the
-    //      AsyncCallable into a failed future that catchingAsync can observe.
-    //
-    //   2. Throwable.class was too broad — it swallowed Error subclasses
-    //      including OutOfMemoryError, VirtualMachineError, LinkageError,
-    //      AssertionError. On a memory-pressured cold boot (the exact target
-    //      scenario of #734) an OOM inside NotificationCompat.Builder.build()
-    //      would be silently absorbed and the handler would proceed to a Room
-    //      write while the JVM was seconds from termination. Narrowed to
-    //      Exception.class so Errors propagate as batch failures; the
-    //      per-entity catch in rescheduleNotifications leaves the row in Room
-    //      for a genuine retry on the next reboot pass.
     ListenableFuture<Void> displayAttempt =
         Futures.submitAsync(
             () -> NotificationManager.displayNotification(notificationModel, null), executor);
@@ -610,8 +468,6 @@ class NotifeeAlarmManager {
               try {
                 updateFutures.add(rescheduleNotification(workDataEntity));
               } catch (Throwable t) {
-                // A single bad entity must not prevent the rest of the batch
-                // from being rescheduled — log and continue.
                 Logger.w(
                     TAG,
                     "Failed to reschedule entity "
@@ -621,13 +477,6 @@ class NotifeeAlarmManager {
               }
             }
 
-            // Awaits all per-entity update futures before finishing the boot
-            // receiver, bounded by the 8s ANR safety timeout. Any not-yet-
-            // persisted next-fire anchors left behind on timeout will catch up
-            // on the next alarm fire. The releaseLock runnable is invoked from
-            // inside finishReceiverWhenDone's terminal callbacks (success,
-            // failure, or timeout), guaranteeing the CAS flag is cleared
-            // exactly once on every code path.
             ListenableFuture<List<Void>> combined = Futures.allAsList(updateFutures);
             finishReceiverWhenDone(combined, pendingResult, releaseLock, "rescheduleNotifications");
           }

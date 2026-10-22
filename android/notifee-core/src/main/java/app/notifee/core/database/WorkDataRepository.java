@@ -54,10 +54,6 @@ public class WorkDataRepository {
     mExecutor = executor;
   }
 
-  // Submit a DAO write to the listening executor and return a future that
-  // completes when the DAO call returns (success or exception). Using the
-  // submit(Runnable, result) overload avoids the Callable<Object> inference
-  // that would otherwise require a cast at every call site.
   private @NonNull ListenableFuture<Void> submitWrite(@NonNull Runnable work) {
     return mExecutor.submit(work, (Void) null);
   }

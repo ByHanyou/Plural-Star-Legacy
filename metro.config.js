@@ -18,7 +18,6 @@ const config = {
       /[\\/]node_modules[\\/].*[\\/](android|ios)[\\/]build[\\/].*/,
       /[\\/]android[\\/]build[\\/].*/,
       /[\\/]android[\\/]app[\\/]build[\\/].*/,
-      /[\\/]ios[\\/]build[\\/].*/,
     ],
     resolveRequest: (context, moduleName, platform) => {
       if (adapters[moduleName]) {

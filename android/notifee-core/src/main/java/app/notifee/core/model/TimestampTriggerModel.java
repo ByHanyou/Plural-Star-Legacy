@@ -44,8 +44,6 @@ public class TimestampTriggerModel {
   private TimestampTriggerModel(Bundle bundle) {
     mTimeTriggerBundle = bundle;
 
-    // set initial values
-    TimeUnit timeUnit = null;
     if (mTimeTriggerBundle.containsKey("repeatFrequency")) {
       int repeatFrequency =
           BundleValueReader.getIntPreserving(mTimeTriggerBundle, "repeatFrequency");
@@ -55,7 +53,6 @@ public class TimestampTriggerModel {
 
       switch (repeatFrequency) {
         case -1:
-          // default value for one-time trigger
           break;
         case 0:
           mInterval = mRepeatInterval;
@@ -68,7 +65,6 @@ public class TimestampTriggerModel {
           mRepeatFrequency = DAILY;
           break;
         case 2:
-          // weekly, 7 days
           mInterval = 7 * mRepeatInterval;
           mTimeUnit = TimeUnit.DAYS;
           mRepeatFrequency = WEEKLY;
@@ -93,7 +89,6 @@ public class TimestampTriggerModel {
         type = 3;
       }
 
-      // this is for the deprecated `alarmManager.allowWhileIdle` option
       if (alarmManagerBundle.containsKey("allowWhileIdle")
           && alarmManagerBundle.getBoolean("allowWhileIdle")) {
         type = 3;
@@ -106,7 +101,6 @@ public class TimestampTriggerModel {
         case 1:
           mAlarmType = AlarmType.SET_AND_ALLOW_WHILE_IDLE;
           break;
-        // default behavior when alarmManager is true:
         default:
         case 2:
           mAlarmType = AlarmType.SET_EXACT;
@@ -119,7 +113,6 @@ public class TimestampTriggerModel {
           break;
       }
     } else if (mTimeTriggerBundle.containsKey("allowWhileIdle")) {
-      // for dart
       mWithAlarmManager = true;
       mAlarmType = AlarmType.SET_EXACT_AND_ALLOW_WHILE_IDLE;
     }
@@ -141,7 +134,6 @@ public class TimestampTriggerModel {
   }
 
   public void setNextTimestamp() {
-    // Skip for non-repeating triggers
     if (mRepeatFrequency == null) {
       return;
     }

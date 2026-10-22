@@ -27,7 +27,7 @@ public class ColorUtils {
     if (colorString != null) {
       return colorString;
     } else {
-      return "#" + Integer.toHexString(color).substring(2);
+      return "#" + Integer.toHexString(0x1000000 | (color & 0xFFFFFF)).substring(1);
     }
   }
 

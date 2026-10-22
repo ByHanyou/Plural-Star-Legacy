@@ -19,11 +19,6 @@ public class AlarmUtils {
     return (AlarmManager) getApplicationContext().getSystemService(Context.ALARM_SERVICE);
   }
 
-  /**
-   * Attempts to open the device's alarm special access settings
-   *
-   * @param activity
-   */
   public static void openAlarmPermissionSettings(Activity activity) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
       return;

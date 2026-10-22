@@ -93,11 +93,12 @@ Full privacy policy: [https://byhanyou.github.io/Plural-Star/](https://byhanyou.
 
 ## Build from Source
 
+Requirements:
+- Node 20+
+- JDK 17
+- Android SDK with NDK 27.0.12077973
+
 ```bash
-# Requirements:
-# - Node 20+
-# - JDK 17
-# - Android SDK with NDK 27.0.12077973
 git clone https://github.com/ByHanyou/Plural-Star-Legacy.git
 cd Plural-Star-Legacy
 npm install
@@ -107,21 +108,29 @@ npm install
 
 ```bash
 cd android
-./gradlew assembleRelease
+bash ./gradlew assembleRelease
 ```
 
 The APK lands at `android/app/build/outputs/apk/release/app-release.apk`.
+
+**Android development build**
+
+```bash
+npm run android
+```
+
+Debug builds install as `com.pluralspace.app.legacy.debug`, next to the release build. Gradle runs on the JDK that `JAVA_HOME` points to (`JAVA_HOME=/path/to/jdk-17 npm run android`). `npm run android -- --no-packager` skips starting Metro, so you run `npm start` yourself.
+
+Development builds log at `debug` level and print the startup and storage traces; release builds log at `info` and skip them. The bundler also inlines `PS_RELAY_URL`, `PS_GATEWAY_URL`, `PS_LOG_LEVEL`, `PS_VERBOSE_NETWORK`, `PS_STARTUP_TRACE` and `PS_STORAGE_TRACE` from the environment of the Metro process (`PS_LOG_LEVEL=debug npx react-native start --reset-cache`; the cache reset matters because Metro caches transformed files). In a development build the system settings sheet ends with a **Developer** section: relay and gateway URL overrides, the log level, a verbose network log, the startup and storage traces, a JSON field for every sync, mirror, connection, gateway and cloud timing, and the recent log lines. Overrides are stored on the device under `psdev:config`, outside the synced `ps:` keys, and release builds ignore them.
 
 Release builds are signed with the Plural Star release key, which is not in this repository. To build your own, point `signingConfigs.release` in `android/app/build.gradle` at your own keystore.
 
 **How the project fits together**
 
-- `src`, `App.tsx` and `index.js` are copied unchanged from Plural Star and never edited here.
+- `src`, `App.tsx` and `index.js` are copied from Plural Star. The only edits are five `estimatedItemSize` lines that FlashList v1 needs.
 - `legacy/` holds small adapters that give the shared code the same APIs it uses in Plural Star, on top of the older libraries this build needs.
 - `patches/` holds the fixes applied to installed packages on every `npm install`.
 - `android/notifee-core/` is the native notification core from react-native-notify-kit, built from source.
-
-The full design, and the steps for bringing in changes from Plural Star, are in [SPEC.md](SPEC.md).
 
 ---
 

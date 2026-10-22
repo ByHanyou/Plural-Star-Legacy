@@ -50,12 +50,6 @@ public class NotificationAndroidStyleModel {
     return new NotificationAndroidStyleModel(styleBundle);
   }
 
-  /**
-   * Converts a person bundle from JS into a Person
-   *
-   * @param personBundle
-   * @return
-   */
   private static ListenableFuture<Person> getPerson(
       ListeningExecutorService lExecutor, Bundle personBundle) {
     return lExecutor.submit(
@@ -136,11 +130,6 @@ public class NotificationAndroidStyleModel {
     return styleTask;
   }
 
-  /**
-   * Gets a BigPictureStyle for a notification
-   *
-   * @return
-   */
   private ListenableFuture<NotificationCompat.Style> getBigPictureStyleTask(
       ListeningExecutorService lExecutor) {
     return lExecutor.submit(
@@ -180,7 +169,6 @@ public class NotificationAndroidStyleModel {
           if (mNotificationAndroidStyleBundle.containsKey("largeIcon")) {
             largeIcon = mNotificationAndroidStyleBundle.getString("largeIcon");
 
-            // largeIcon has been specified to be null for BigPicture
             if (largeIcon == null) {
               bigPictureStyle.bigLargeIcon((android.graphics.Bitmap) null);
             }
@@ -227,11 +215,6 @@ public class NotificationAndroidStyleModel {
         });
   }
 
-  /**
-   * Gets a BigTextStyle for a notification
-   *
-   * @return NotificationCompat.BigTextStyle
-   */
   private NotificationCompat.BigTextStyle getBigTextStyle() {
     NotificationCompat.BigTextStyle bigTextStyle = new NotificationCompat.BigTextStyle();
 
@@ -256,11 +239,6 @@ public class NotificationAndroidStyleModel {
     return bigTextStyle;
   }
 
-  /**
-   * Gets an InboxStyle for a notification
-   *
-   * @return NotificationCompat.InboxStyle
-   */
   private NotificationCompat.InboxStyle getInboxStyle() {
     NotificationCompat.InboxStyle inputStyle = new NotificationCompat.InboxStyle();
 
@@ -286,7 +264,6 @@ public class NotificationAndroidStyleModel {
     return inputStyle;
   }
 
-  /** Gets a MessagingStyle for a notification */
   private ListenableFuture<NotificationCompat.Style> getMessagingStyleTask(
       ListeningExecutorService lExecutor) {
     return lExecutor.submit(

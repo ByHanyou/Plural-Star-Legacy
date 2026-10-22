@@ -91,38 +91,11 @@ class NotificationManager {
   private static final String EXTRA_NOTIFEE_NOTIFICATION = "notifee.notification";
   private static final String EXTRA_NOTIFEE_TRIGGER = "notifee.trigger";
 
-  // Denylist for getDisplayedNotifications() data extraction — pairs with
-  // EXCLUDED_DATA_KEY_PREFIXES below. `fcm_options` is the Firebase HTTP v1
-  // `Message.fcm_options` analytics label; on iOS it is caught by the bare
-  // `hasPrefix:@"fcm"` filter in NotifeeCoreUtil.m:627, and we match that
-  // filter exactly on Android via this set so the analytics label never
-  // leaks into `notification.data`.
   private static final Set<String> EXCLUDED_DATA_KEYS =
       new HashSet<>(
           Arrays.asList(
               "from", "collapse_key", "message_type", "message_id", "aps", "fcm_options"));
 
-  // Prefixes that denote system or internal keys.
-  // - `android.`, `gcm.`, `google.`, `fcm.` include the trailing dot so
-  //   legitimate custom keys like `androidify`, `googleish`, or `fcmRegion`
-  //   survive the filter.
-  // - `notifee` is intentionally without dot: it's the library's own namespace
-  //   and we reserve it entirely (matches the internal constants
-  //   `notifee.notification` / `notifee.trigger`, plus `notifee_options` and
-  //   any future addition — mirrors iOS NotifeeCoreUtil.m:626 which uses
-  //   hasPrefix:@"notifee" for the same reason).
-  //
-  // Note: `fcm.` with the dot on Android diverges from iOS, which uses bare
-  // `hasPrefix:@"fcm"` (NotifeeCoreUtil.m:627-628). The iOS filter exists
-  // specifically to drop `fcm_options` (the Firebase HTTP v1 analytics
-  // label, documented inline in that iOS source as `// fcm_options`) — it
-  // is NOT a historical/broad match. We handle `fcm_options` via the
-  // EXCLUDED_DATA_KEYS exact-match set above, which gives us parity on the
-  // Firebase-reserved key while preserving realistic user keys like
-  // `fcmRegion` and `fcmToken` that iOS's broader filter would also drop.
-  // Apps that need strict cross-platform consistency for custom data keys
-  // should avoid names starting with `fcm` entirely (iOS drops them, Android
-  // preserves everything except the exact `fcm_options` label).
   private static final String[] EXCLUDED_DATA_KEY_PREFIXES = {
     "android.", "gcm.", "google.", "notifee", "fcm."
   };
@@ -134,17 +107,11 @@ class NotificationManager {
   private static final int NOTIFICATION_TYPE_DISPLAYED = 1;
   private static final int NOTIFICATION_TYPE_TRIGGER = 2;
 
-  // NotificationCompat.Builder methods (setSound, setDefaults, setPriority, setVibrate, setLights)
-  // are deprecated since API 26 in favor of NotificationChannel, but are still required for
-  // backward compatibility on API 24-25 via NotificationCompat.
   @SuppressWarnings("deprecation")
   private static ListenableFuture<NotificationCompat.Builder> notificationBundleToBuilder(
       NotificationModel notificationModel) {
     final NotificationAndroidModel androidModel = notificationModel.getAndroid();
 
-    /*
-     * Construct the initial NotificationCompat.Builder instance
-     */
     Callable<NotificationCompat.Builder> builderCallable =
         () -> {
           Trace.beginSection("notifee:buildNotification");
@@ -154,7 +121,6 @@ class NotificationManager {
                 new NotificationCompat.Builder(
                     getApplicationContext(), androidModel.getChannelId());
 
-            // must always keep at top
             builder.setExtras(notificationModel.getData());
 
             builder.setDeleteIntent(
@@ -162,36 +128,17 @@ class NotificationManager {
                     ReceiverService.DELETE_INTENT,
                     new String[] {"notification"},
                     notificationModel.toBundle()));
-            // Resolve the effective pressAction bundle for the content intent.
-            // Three cases:
-            //   1. pressAction is null (absent from bundle, e.g. trigger rehydrated from Room DB
-            //      after app kill): synthesize default { id:'default', launchActivity:'default' }
-            //      so tapping the notification opens the app (defense-in-depth for paths that
-            //      bypass the TS validator).
-            //   2. pressAction has the opt-out sentinel id: user explicitly passed
-            //      pressAction: null in JS, so no content intent is created.
-            //   3. pressAction is a normal bundle: pass through unchanged.
-            //
-            // pressActionForIntent  → used for creating the launch intent (or null for opt-out)
-            // pressActionForExtras  → used in the receiver intent extras (event payload);
-            //                         null for cases 1 & 2 to avoid leaking synthesized defaults
-            //                         or the sentinel id into the JS event.
             Bundle pressActionForIntent = androidModel.getPressAction();
             Bundle pressActionForExtras = pressActionForIntent;
             if (pressActionForIntent == null) {
-              // Case 1: absent — synthesize default for launch, null for extras
               pressActionForIntent = new Bundle();
               pressActionForIntent.putString("id", "default");
               pressActionForIntent.putString("launchActivity", "default");
-              // pressActionForExtras stays null: the original notification didn't have
-              // pressAction, so the event shouldn't either.
             } else if (NotificationPendingIntent.PRESS_ACTION_OPT_OUT_ID.equals(
                 pressActionForIntent.getString("id"))) {
-              // Case 2: explicit opt-out sentinel — no launch intent, no sentinel in extras
               pressActionForIntent = null;
               pressActionForExtras = null;
             }
-            // Case 3: normal pressAction — both variables point to the original bundle
 
             int targetSdkVersion =
                 ContextHolder.getApplicationContext().getApplicationInfo().targetSdkVersion;
@@ -338,9 +285,6 @@ class NotificationManager {
           }
         };
 
-    /*
-     * A task continuation that fetches the largeIcon through Fresco, if specified.
-     */
     AsyncFunction<NotificationCompat.Builder, NotificationCompat.Builder> largeIconContinuation =
         taskResult ->
             LISTENING_CACHED_THREAD_POOL.submit(
@@ -380,9 +324,6 @@ class NotificationManager {
                   return builder;
                 });
 
-    /*
-     * A task continuation for full-screen action, if specified.
-     */
     AsyncFunction<NotificationCompat.Builder, NotificationCompat.Builder>
         fullScreenActionContinuation =
             taskResult ->
@@ -431,10 +372,6 @@ class NotificationManager {
                       return builder;
                     });
 
-    /*
-     * A task continuation that builds all actions, if any. Additionally fetches
-     * icon bitmaps through Fresco.
-     */
     AsyncFunction<NotificationCompat.Builder, NotificationCompat.Builder> actionsContinuation =
         taskResult ->
             LISTENING_CACHED_THREAD_POOL.submit(
@@ -515,11 +452,6 @@ class NotificationManager {
                   return builder;
                 });
 
-    /*
-     * A task continuation that builds the notification style, if any. Additionally
-     * fetches any image bitmaps (e.g. Person image, or BigPicture image) through
-     * Fresco.
-     */
     AsyncFunction<NotificationCompat.Builder, NotificationCompat.Builder> styleContinuation =
         builder ->
             LISTENING_CACHED_THREAD_POOL.submit(
@@ -544,13 +476,9 @@ class NotificationManager {
                 });
 
     return new ExtendedListenableFuture<>(LISTENING_CACHED_THREAD_POOL.submit(builderCallable))
-        // get a large image bitmap if largeIcon is set
         .continueWith(largeIconContinuation, LISTENING_CACHED_THREAD_POOL)
-        // build notification actions, tasks based to allow image fetching
         .continueWith(actionsContinuation, LISTENING_CACHED_THREAD_POOL)
-        // build notification style, tasks based to allow image fetching
         .continueWith(styleContinuation, LISTENING_CACHED_THREAD_POOL)
-        // set full screen action, if fullScreenAction is set
         .continueWith(fullScreenActionContinuation, LISTENING_CACHED_THREAD_POOL);
   }
 
@@ -571,8 +499,6 @@ class NotificationManager {
                     WorkManager workManager = WorkManager.getInstance(getApplicationContext());
                     workManager.cancelAllWorkByTag(Worker.WORK_TYPE_NOTIFICATION_TRIGGER);
 
-                    // Remove all cancelled and finished work from its internal database
-                    // states include SUCCEEDED, FAILED and CANCELLED
                     workManager.pruneWork();
                   }
                   return null;
@@ -581,9 +507,6 @@ class NotificationManager {
             task -> {
               if (notificationType == NOTIFICATION_TYPE_TRIGGER
                   || notificationType == NOTIFICATION_TYPE_ALL) {
-                // Chain the Room delete onto the alarm-manager cancel so the outer
-                // future — and therefore the JS Promise — only completes after Room
-                // has drained. Fixes upstream invertase/notifee#549.
                 return Futures.transformAsync(
                     NotifeeAlarmManager.cancelAllNotifications(),
                     ignored -> WorkDataRepository.getInstance(getApplicationContext()).deleteAll(),
@@ -607,10 +530,7 @@ class NotificationManager {
                     Logger.i(TAG, "Removing notification with id " + id);
 
                     if (notificationType != NOTIFICATION_TYPE_TRIGGER) {
-                      // Cancel notifications displayed by FCM which will always have
-                      // an id of 0 and a tag, see https://github.com/invertase/notifee/pull/175
                       if (tag != null && id.equals("0")) {
-                        // Attempt to parse id as integer
                         Integer integerId = null;
 
                         try {
@@ -628,7 +548,6 @@ class NotificationManager {
                         }
                       }
 
-                      // Cancel a notification created with notifee
                       notificationManagerCompat.cancel(tag, id.hashCode());
                     }
 
@@ -636,11 +555,8 @@ class NotificationManager {
                       Logger.i(TAG, "Removing notification with id " + id);
 
                       workManager.cancelUniqueWork("trigger:" + id);
-                      // Remove all cancelled and finished work from its internal database
-                      // states include SUCCEEDED, FAILED and CANCELLED
                       workManager.pruneWork();
 
-                      // And with alarm manager
                       NotifeeAlarmManager.cancelNotification(id);
                     }
                   }
@@ -649,9 +565,6 @@ class NotificationManager {
                 }))
         .continueWith(
             task -> {
-              // Chain the Room delete so the outer future — and therefore the JS
-              // Promise — only completes after Room has drained. Fixes upstream
-              // invertase/notifee#549 for the per-id cancel path.
               if (notificationType != NOTIFICATION_TYPE_DISPLAYED) {
                 return WorkDataRepository.getInstance(getApplicationContext()).deleteByIds(ids);
               }
@@ -669,7 +582,6 @@ class NotificationManager {
               try {
                 NotificationCompat.Builder builder = taskResult;
 
-                // Add the following extras for `getDisplayedNotifications()`
                 Bundle extrasBundle = new Bundle();
                 extrasBundle.putBundle(EXTRA_NOTIFEE_NOTIFICATION, notificationModel.toBundle());
                 if (triggerBundle != null) {
@@ -679,14 +591,11 @@ class NotificationManager {
 
                 NotificationAndroidModel androidBundle = notificationModel.getAndroid();
 
-                // Set foreground service behavior before building (only for FGS notifications).
-                // IMMEDIATE eliminates the 10-second display delay on Android 12+.
                 if (androidBundle.getAsForegroundService()) {
                   builder.setForegroundServiceBehavior(
                       androidBundle.getForegroundServiceBehavior());
                 }
 
-                // build notification
                 Notification notification = Objects.requireNonNull(builder).build();
 
                 int hashCode = notificationModel.getHashCode();
@@ -765,11 +674,6 @@ class NotificationManager {
         LISTENING_CACHED_THREAD_POOL);
   }
 
-  // Returns a future that completes only after the Room insert has persisted AND
-  // WorkManager has enqueued the periodic work. Chaining Room-first guarantees the
-  // worker reads the row on its first fire even if the process is killed between
-  // the JS Promise resolving and WorkManager scheduling. Fixes upstream
-  // invertase/notifee#549 for the interval-trigger path.
   static ListenableFuture<Void> createIntervalTriggerNotification(
       NotificationModel notificationModel, Bundle triggerBundle) {
     IntervalTriggerModel trigger = IntervalTriggerModel.fromBundle(triggerBundle);
@@ -804,10 +708,6 @@ class NotificationManager {
         LISTENING_CACHED_THREAD_POOL);
   }
 
-  // Returns a future that completes only after the Room insert has persisted AND
-  // the AlarmManager / WorkManager schedule call has run. Same rationale as the
-  // interval path above. Fixes upstream invertase/notifee#549 for the timestamp
-  // trigger path (AlarmManager by default since 9.1.12).
   static ListenableFuture<Void> createTimestampTriggerNotification(
       NotificationModel notificationModel, Bundle triggerBundle) {
     TimestampTriggerModel trigger = TimestampTriggerModel.fromBundle(triggerBundle);
@@ -845,7 +745,6 @@ class NotificationManager {
 
           WorkManager workManager = WorkManager.getInstance(context);
 
-          // WorkManager - One time trigger
           if (interval == -1) {
             OneTimeWorkRequest.Builder workRequestBuilder =
                 new OneTimeWorkRequest.Builder(Worker.class);
@@ -857,7 +756,6 @@ class NotificationManager {
             workManager.enqueueUniqueWork(
                 uniqueWorkName, ExistingWorkPolicy.REPLACE, workRequestBuilder.build());
           } else {
-            // WorkManager - repeat trigger
             PeriodicWorkRequest.Builder workRequestBuilder =
                 new PeriodicWorkRequest.Builder(
                     Worker.class, trigger.getInterval(), trigger.getTimeUnit());
@@ -948,25 +846,6 @@ class NotificationManager {
         });
   }
 
-  /**
-   * Builds a {@link Bundle} of custom data keys from a {@link StatusBarNotification} extras bundle,
-   * filtering out Android system keys, FCM/Firebase internals, and Notifee-reserved keys via {@link
-   * #shouldIncludeInData(String)}. Mirrors iOS {@code parseDataFromUserInfo:} in {@code
-   * NotifeeCoreUtil.m} on the Firebase-reserved keys ({@code fcm_options}, {@code gcm.*}, {@code
-   * google.*}, {@code aps}, etc.), with a deliberate divergence: Android uses {@code fcm.} (with
-   * dot) plus an exact-match on {@code fcm_options} to preserve realistic user keys like {@code
-   * fcmRegion} and {@code fcmToken} that iOS's broader bare-{@code fcm} prefix would also drop. See
-   * {@link #EXCLUDED_DATA_KEY_PREFIXES} and {@link #EXCLUDED_DATA_KEYS} for the full rationale.
-   *
-   * <p>Values are coerced to {@code String} via {@code toString()}. FCM {@code data} payloads are
-   * {@code Map<String, String>} by contract, so the coercion is a no-op in practice; the defensive
-   * {@code toString()} call only matters for the rare non-String extra that might survive the
-   * denylist (e.g. a numeric value added via {@code Bundle.putInt}).
-   *
-   * <p>Always returns a non-null {@code Bundle} (possibly empty) so that JS consumers can
-   * dereference {@code notification.data.foo} without null-checking {@code data} itself — matching
-   * iOS, which always returns a dictionary.
-   */
   static Bundle extractDataFromExtras(Bundle extras) {
     Bundle dataBundle = new Bundle();
     if (extras == null) {
@@ -984,11 +863,6 @@ class NotificationManager {
     return dataBundle;
   }
 
-  /**
-   * Pure denylist predicate used by {@link #extractDataFromExtras(Bundle)}. Extracted for direct
-   * unit testing without having to construct a {@link Bundle}. See the {@link
-   * #EXCLUDED_DATA_KEY_PREFIXES} docs for the reasoning behind each prefix choice.
-   */
   static boolean shouldIncludeInData(String key) {
     if (key == null) {
       return false;
@@ -1060,7 +934,6 @@ class NotificationManager {
         LISTENING_CACHED_THREAD_POOL);
   }
 
-  /* Execute work from trigger notifications via WorkManager*/
   static void doScheduledWork(
       Data data, CallbackToFutureAdapter.Completer<ListenableWorker.Result> completer) {
 
@@ -1075,7 +948,6 @@ class NotificationManager {
                   byte[] notificationBytes;
 
                   if (workDataEntity == null || workDataEntity.getNotification() == null) {
-                    // check if notification bundle is stored with Work Manager
                     notificationBytes = data.getByteArray("notification");
                     if (notificationBytes != null) {
                       Logger.w(
@@ -1097,10 +969,11 @@ class NotificationManager {
                   NotificationModel notificationModel =
                       NotificationModel.fromBundle(ObjectUtils.bytesToBundle(notificationBytes));
 
-                  byte[] triggerBytes = workDataEntity.getTrigger();
+                  byte[] triggerBytes =
+                      workDataEntity != null ? workDataEntity.getTrigger() : null;
                   Bundle triggerBundle = null;
 
-                  if (workDataEntity.getTrigger() != null) {
+                  if (triggerBytes != null) {
                     triggerBundle = ObjectUtils.bytesToBundle(triggerBytes);
                   }
 
@@ -1123,17 +996,6 @@ class NotificationManager {
                           String workerRequestType = data.getString(Worker.KEY_WORK_REQUEST);
                           if (workerRequestType != null
                               && workerRequestType.equals(Worker.WORK_REQUEST_ONE_TIME)) {
-                            // DO NOT reorder — completer.set must only run after the
-                            // delete future completes, otherwise WorkManager may start
-                            // a new work instance that reads the stale row. Previously
-                            // completer.set fired before the delete was enqueued, leaving
-                            // a zombie row that reboot recovery would resurrect as a
-                            // ghost alarm. See #549 audit Part B, Caller #5.
-                            //
-                            // Note: CallbackToFutureAdapter.Completer.set() returns
-                            // false on double-set, it does NOT throw. This is an
-                            // androidx contract. Do not refactor under the assumption
-                            // that double-set is dangerous.
                             Futures.addCallback(
                                 WorkDataRepository.getInstance(getApplicationContext())
                                     .deleteById(id),
@@ -1145,11 +1007,6 @@ class NotificationManager {
 
                                   @Override
                                   public void onFailure(@NonNull Throwable t) {
-                                    // Notification was already displayed; a failed
-                                    // delete leaves an orphan row that the next
-                                    // cancelAll or app restart will clean up. Still
-                                    // report success so WorkManager doesn't retry
-                                    // the already-displayed notification.
                                     Logger.e(
                                         TAG,
                                         "Failed to delete one-time trigger row after" + " display",

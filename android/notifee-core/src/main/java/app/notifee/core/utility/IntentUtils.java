@@ -42,7 +42,6 @@ public class IntentUtils {
       }
 
     } catch (Exception e) {
-      // noop
     }
 
     return null;

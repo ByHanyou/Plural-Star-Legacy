@@ -21,10 +21,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 
-/*
- * This is invoked when the phone restarts to ensure that all notifications created by the alarm manager
- * are rescheduled correctly, as Android removes all scheduled alarms when the phone shuts down.
- */
 public class RebootBroadcastReceiver extends BroadcastReceiver {
   private static final String TAG = "RebootReceiver";
   private static final String ACTION_QUICKBOOT_POWERON = "android.intent.action.QUICKBOOT_POWERON";
@@ -47,10 +43,6 @@ public class RebootBroadcastReceiver extends BroadcastReceiver {
     }
 
     PendingResult pendingResult = goAsync();
-    // Tracks whether the synchronous section successfully handed off to the
-    // async reschedule path. If not, the finally block must call finish() to
-    // avoid leaving the broadcast unterminated — Android will otherwise kill
-    // the process after ~10s and race subsequent reboot broadcasts.
     boolean asyncHandoffSucceeded = false;
     try {
       Logger.i(TAG, "Received reboot event");

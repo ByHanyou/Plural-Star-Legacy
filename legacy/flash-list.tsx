@@ -6,6 +6,8 @@ export * from 'flash-list-v1';
 
 export type FlashListRef<T> = ListV1<T>;
 
+export const useMappingHelper = () => ({getMappingKey: (itemKey: string | number, _index: number) => itemKey});
+
 type VisiblePosition = {
   disabled?: boolean;
   minIndexForVisible?: number;

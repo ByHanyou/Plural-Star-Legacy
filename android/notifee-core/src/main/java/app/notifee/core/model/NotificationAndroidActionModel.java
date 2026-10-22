@@ -45,37 +45,19 @@ public class NotificationAndroidActionModel {
     return (Bundle) mNotificationAndroidActionBundle.clone();
   }
 
-  /**
-   * Gets the title of the action
-   *
-   * @return String
-   */
   public @NonNull String getTitle() {
     return Objects.requireNonNull(mNotificationAndroidActionBundle.getString("title"));
   }
 
-  /** Gets the icon of the action */
   public @Nullable String getIcon() {
     return mNotificationAndroidActionBundle.getString("icon");
   }
 
-  /**
-   * Gets the pressAction instance for this action
-   *
-   * @return NotificationAndroidPressActionModel
-   */
   public @NonNull NotificationAndroidPressActionModel getPressAction() {
     Bundle pressActionBundle = mNotificationAndroidActionBundle.getBundle("pressAction");
     return NotificationAndroidPressActionModel.fromBundle(pressActionBundle);
   }
 
-  /**
-   * Gets a remote input instance for the action
-   *
-   * @param actionBuilder The allowGeneratedReplies is inside of the remote input to reduce
-   *     confusion, but it lives on the action builder
-   * @return RemoteInput
-   */
   public @Nullable RemoteInput getRemoteInput(NotificationCompat.Action.Builder actionBuilder) {
     if (mNotificationAndroidActionBundle.containsKey("input")) {
       Bundle inputBundle =

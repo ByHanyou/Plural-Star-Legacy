@@ -70,7 +70,6 @@ public class NotificationAndroidModel {
   @RequiresApi(api = Build.VERSION_CODES.Q)
   public int getForegroundServiceType() {
     if (!mNotificationAndroidBundle.containsKey("foregroundServiceTypes")) {
-      // no foreground service types provided, so we default to manifest
       return ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST;
     }
 
@@ -89,7 +88,6 @@ public class NotificationAndroidModel {
       foregroundServiceType |= ObjectUtils.getInt(foregroundServiceTypesArrayList.get(i));
     }
 
-    // from Android 14, it is disallowed to use NONE type, so we default to manifest
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
         && foregroundServiceType == ServiceInfo.FOREGROUND_SERVICE_TYPE_NONE) {
       return ServiceInfo.FOREGROUND_SERVICE_TYPE_MANIFEST;
@@ -98,59 +96,30 @@ public class NotificationAndroidModel {
     return foregroundServiceType;
   }
 
-  /**
-   * Gets whether the notification is for a foreground service
-   *
-   * @return Boolean
-   */
   public Boolean getAsForegroundService() {
     return mNotificationAndroidBundle.getBoolean("asForegroundService", false);
   }
 
-  /**
-   * Gets the foreground service behavior for the notification. Controls whether the foreground
-   * service notification is shown immediately or deferred on Android 12+.
-   *
-   * @return int matching a NotificationCompat.FOREGROUND_SERVICE_* constant
-   */
   public int getForegroundServiceBehavior() {
-    return mNotificationAndroidBundle.getInt(
-        "foregroundServiceBehavior", NotificationCompat.FOREGROUND_SERVICE_DEFAULT);
+    return BundleValueReader.getIntPreserving(
+        mNotificationAndroidBundle,
+        "foregroundServiceBehavior",
+        NotificationCompat.FOREGROUND_SERVICE_DEFAULT);
   }
 
-  /**
-   * Gets if the notification should light up the screen when displayed
-   *
-   * @return Boolean
-   */
   public Boolean getLightUpScreen() {
     return mNotificationAndroidBundle.getBoolean("lightUpScreen", false);
   }
 
-  /**
-   * Gets whether the notification can be auto cancelled
-   *
-   * @return Boolean
-   */
   public Boolean getAutoCancel() {
     return mNotificationAndroidBundle.getBoolean("autoCancel", false);
   }
 
-  /**
-   * Gets the badge icon type for the notification
-   *
-   * @return Integer
-   */
   public @Nullable Integer getBadgeIconType() {
     return BundleValueReader.getIntPreserving(
         mNotificationAndroidBundle, "badgeIconType", NotificationCompat.BADGE_ICON_LARGE);
   }
 
-  /**
-   * Gets the channel ID for the notification, returns an empty string if none is available
-   *
-   * @return String
-   */
   public @NonNull String getChannelId() {
     if (mNotificationAndroidBundle.containsKey("channelId")) {
       return Objects.requireNonNull(mNotificationAndroidBundle.getString("channelId"));
@@ -159,20 +128,10 @@ public class NotificationAndroidModel {
     return "";
   }
 
-  /**
-   * Gets the notification category
-   *
-   * @return String
-   */
   public @Nullable String getCategory() {
     return mNotificationAndroidBundle.getString("category");
   }
 
-  /**
-   * Gets the parsed notification color
-   *
-   * @return Integer
-   */
   public @Nullable Integer getColor() {
     if (mNotificationAndroidBundle.containsKey("color")) {
       return Color.parseColor(mNotificationAndroidBundle.getString("color"));
@@ -181,20 +140,10 @@ public class NotificationAndroidModel {
     return null;
   }
 
-  /**
-   * Gets whether the notification is colorized
-   *
-   * @return Boolean
-   */
   public Boolean getColorized() {
     return mNotificationAndroidBundle.getBoolean("colorized", false);
   }
 
-  /**
-   * Gets whether the notification chronometer should count down
-   *
-   * @return Boolean
-   */
   public Boolean getChronometerCountDown() {
     if (mNotificationAndroidBundle.containsKey("chronometerDirection")) {
       String direction = mNotificationAndroidBundle.getString("chronometerDirection");
@@ -204,18 +153,8 @@ public class NotificationAndroidModel {
     return false;
   }
 
-  /**
-   * Gets the notification defaults (for API < 26)
-   *
-   * @param hasCustomSound A flag to indicate if notificaiton has a custom sound and has successfuly
-   *     resolved
-   * @return Integer
-   */
-  // Notification.DEFAULT_* constants are deprecated since API 26 in favor of NotificationChannel,
-  // but are still needed for pre-channel backward compatibility (minSdk 24).
   @SuppressWarnings("deprecation")
   public Integer getDefaults(Boolean hasCustomSound) {
-    String TAG = "NotificationManager";
     Integer defaults = 0;
 
     if (mNotificationAndroidBundle.containsKey("defaults")) {
@@ -243,48 +182,23 @@ public class NotificationAndroidModel {
     return defaults;
   }
 
-  /**
-   * Gets the notification tag
-   *
-   * @return String
-   */
   public @Nullable String getTag() {
     return mNotificationAndroidBundle.getString("tag");
   }
 
-  /**
-   * Gets the notification group key
-   *
-   * @return String
-   */
   public @Nullable String getGroup() {
     return mNotificationAndroidBundle.getString("groupId");
   }
 
-  /**
-   * Gets the group alert behaviour for a notification
-   *
-   * @return int
-   */
   public int getGroupAlertBehaviour() {
     return BundleValueReader.getIntPreserving(
         mNotificationAndroidBundle, "groupAlertBehavior", NotificationCompat.GROUP_ALERT_ALL);
   }
 
-  /**
-   * Gets whether the notification is the group summary
-   *
-   * @return Boolean
-   */
   public Boolean getGroupSummary() {
     return mNotificationAndroidBundle.getBoolean("groupSummary", false);
   }
 
-  /**
-   * Gets the input history of the notification
-   *
-   * @return CharSequence[]
-   */
   public @Nullable CharSequence[] getInputHistory() {
     if (mNotificationAndroidBundle.containsKey("inputHistory")) {
       ArrayList<String> inputHistoryArray =
@@ -296,16 +210,10 @@ public class NotificationAndroidModel {
     return null;
   }
 
-  /**
-   * Returns true if the notification has a large icon field
-   *
-   * @return Boolean
-   */
   public Boolean hasLargeIcon() {
     return mNotificationAndroidBundle.containsKey("largeIcon");
   }
 
-  /** Returns the large icon string */
   public String getLargeIcon() {
     if (hasLargeIcon()) {
       return Objects.requireNonNull(mNotificationAndroidBundle.getString("largeIcon"));
@@ -314,19 +222,11 @@ public class NotificationAndroidModel {
     return null;
   }
 
-  /** Returns the large icon string */
   public Boolean getCircularLargeIcon() {
     return Objects.requireNonNull(
         mNotificationAndroidBundle.getBoolean("circularLargeIcon", false));
   }
 
-  /**
-   * Gets the light output for the notification
-   *
-   * @return ArrayList<Integer>
-   */
-  // BundleValueReader.getArrayListValue returns ArrayList<?>, so element casts to String/Integer
-  // are inherently unchecked but correct for our serialization format.
   @SuppressWarnings("unchecked")
   public @Nullable ArrayList<Integer> getLights() {
     if (mNotificationAndroidBundle.containsKey("lights")) {
@@ -351,20 +251,10 @@ public class NotificationAndroidModel {
     return null;
   }
 
-  /**
-   * Gets whether the notification is for local devices only
-   *
-   * @return Boolean
-   */
   public Boolean getLocalOnly() {
     return mNotificationAndroidBundle.getBoolean("localOnly", false);
   }
 
-  /**
-   * Gets a custom set number for the device notification count
-   *
-   * @return Integer
-   */
   public Integer getNumber() {
     if (mNotificationAndroidBundle.containsKey("badgeCount")) {
       return BundleValueReader.getIntPreserving(mNotificationAndroidBundle, "badgeCount");
@@ -373,29 +263,14 @@ public class NotificationAndroidModel {
     return null;
   }
 
-  /**
-   * Gets whether this notification is ongoing
-   *
-   * @return Boolean
-   */
   public Boolean getOngoing() {
     return mNotificationAndroidBundle.getBoolean("ongoing", false);
   }
 
-  /**
-   * Gets whether this notification should loop the sound
-   *
-   * @return Boolean
-   */
   public Boolean getLoopSound() {
     return mNotificationAndroidBundle.getBoolean("loopSound", false);
   }
 
-  /**
-   * Gets an array of flags
-   *
-   * @return int[]
-   */
   public int[] getFlags() {
     if (!mNotificationAndroidBundle.containsKey("flags")) {
       return null;
@@ -414,38 +289,18 @@ public class NotificationAndroidModel {
     return flagsArray;
   }
 
-  /**
-   * Gets whether this notification should only alert once if updated
-   *
-   * @return Boolean
-   */
   public Boolean getOnlyAlertOnce() {
     return mNotificationAndroidBundle.getBoolean("onlyAlertOnce", false);
   }
 
-  /**
-   * Returns true if the notification has a fullScreenAction
-   *
-   * @return Boolean
-   */
   public Boolean hasFullScreenAction() {
     return mNotificationAndroidBundle.containsKey("fullScreenAction");
   }
 
-  /**
-   * Gets an pressAction bundle for the notification
-   *
-   * @return Bundle or null
-   */
   public @Nullable Bundle getPressAction() {
     return mNotificationAndroidBundle.getBundle("pressAction");
   }
 
-  /**
-   * Returns a notification full screen action
-   *
-   * @return NotificationAndroidFullScreenActionModel
-   */
   public @Nullable NotificationAndroidPressActionModel getFullScreenAction() {
     if (!hasFullScreenAction()) {
       return null;
@@ -455,14 +310,6 @@ public class NotificationAndroidModel {
         mNotificationAndroidBundle.getBundle("fullScreenAction"));
   }
 
-  /**
-   * JS uses the same API as importance for priority so we dont confuse users. This maps importance
-   * to a priority flag.
-   *
-   * @return int
-   */
-  // NotificationCompat.PRIORITY_* constants are deprecated since API 26 in favor of
-  // NotificationChannel importance, but are still needed for pre-channel backward compatibility.
   @SuppressWarnings("deprecation")
   public int getPriority() {
     if (!mNotificationAndroidBundle.containsKey("importance")) {
@@ -485,11 +332,6 @@ public class NotificationAndroidModel {
     }
   }
 
-  /**
-   * Gets a AndroidProgress class for the current notification
-   *
-   * @return AndroidProgress
-   */
   public @Nullable AndroidProgress getProgress() {
     if (mNotificationAndroidBundle.containsKey("progress")) {
       Bundle progressBundle =
@@ -504,28 +346,14 @@ public class NotificationAndroidModel {
     return null;
   }
 
-  /**
-   * Gets the shortcut ID for the notification
-   *
-   * @return String
-   */
   public @Nullable String getShortcutId() {
     return mNotificationAndroidBundle.getString("shortcutId");
   }
 
-  /**
-   * Gets whether this notification should show the timestamp
-   *
-   * @return Boolean
-   */
   public Boolean getShowTimestamp() {
     return mNotificationAndroidBundle.getBoolean("showTimestamp", false);
   }
 
-  /**
-   * Gets the small icon resource id from its string name, or null if the icon is missing from the
-   * device.
-   */
   public @Nullable Integer getSmallIcon() {
     if (!mNotificationAndroidBundle.containsKey("smallIcon")) {
       return null;
@@ -549,42 +377,22 @@ public class NotificationAndroidModel {
     return smallIconId;
   }
 
-  /**
-   * Gets the small icon & it's level, or null if the icon is missing from the device.
-   *
-   * @return ArrayList<Integer>
-   */
   public @Nullable Integer getSmallIconLevel() {
     if (!mNotificationAndroidBundle.containsKey("smallIconLevel")) {
       return null;
     }
 
-    return mNotificationAndroidBundle.getInt("smallIconLevel");
+    return BundleValueReader.getIntPreserving(mNotificationAndroidBundle, "smallIconLevel");
   }
 
-  /**
-   * Gets the sort key
-   *
-   * @return String
-   */
   public @Nullable String getSortKey() {
     return mNotificationAndroidBundle.getString("sortKey");
   }
 
-  /**
-   * Returns whether the notification has any styles
-   *
-   * @return Boolean
-   */
   public Boolean hasStyle() {
     return mNotificationAndroidBundle.containsKey("style");
   }
 
-  /**
-   * Returns a task containing a notification style
-   *
-   * @return ListenableFuture<NotificationCompat.Style>
-   */
   public @Nullable NotificationAndroidStyleModel getStyle() {
     if (!hasStyle()) {
       return null;
@@ -593,20 +401,10 @@ public class NotificationAndroidModel {
     return NotificationAndroidStyleModel.fromBundle(mNotificationAndroidBundle.getBundle("style"));
   }
 
-  /**
-   * Gets the ticker text
-   *
-   * @return String
-   */
   public @Nullable String getTicker() {
     return mNotificationAndroidBundle.getString("ticker");
   }
 
-  /**
-   * Gets the timeout after ms, -1 if none exists
-   *
-   * @return long
-   */
   public @Nullable Long getTimeoutAfter() {
     if (mNotificationAndroidBundle.containsKey("timeoutAfter")) {
       return BundleValueReader.getLongPreserving(mNotificationAndroidBundle, "timeoutAfter");
@@ -615,11 +413,6 @@ public class NotificationAndroidModel {
     return null;
   }
 
-  /**
-   * Gets whether the chronometer should be shown
-   *
-   * @return Boolean
-   */
   public Boolean getShowChronometer() {
     return mNotificationAndroidBundle.getBoolean("showChronometer", false);
   }
@@ -632,13 +425,6 @@ public class NotificationAndroidModel {
     return mNotificationAndroidBundle.getString("sound");
   }
 
-  /**
-   * Gets an array vibration pattern for the notification, or empty if not provided
-   *
-   * @return long[]
-   */
-  // BundleValueReader.getArrayListValue returns ArrayList<?>, so the (Integer) cast is inherently
-  // unchecked but correct for our serialization format.
   @SuppressWarnings("unchecked")
   public long[] getVibrationPattern() {
     if (!mNotificationAndroidBundle.containsKey("vibrationPattern")) {
@@ -659,21 +445,11 @@ public class NotificationAndroidModel {
     return vibrateArray;
   }
 
-  /**
-   * Gets the notification visibility
-   *
-   * @return int
-   */
   public int getVisibility() {
     return BundleValueReader.getIntPreserving(
         mNotificationAndroidBundle, "visibility", NotificationCompat.VISIBILITY_PRIVATE);
   }
 
-  /**
-   * Gets the notification timestamp, or -1 if not provided
-   *
-   * @return long
-   */
   public long getTimestamp() {
     return BundleValueReader.getLongPreserving(mNotificationAndroidBundle, "timestamp", -1L);
   }

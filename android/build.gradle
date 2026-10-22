@@ -22,16 +22,13 @@ apply plugin: "com.facebook.react.rootproject"
 
 allprojects {
     repositories {
-        maven { url "$rootDir/../node_modules/@notifee/react-native/android/libs" }
-        mavenLocal()
         google()
         mavenCentral()
-        maven { url 'https://www.jitpack.io' }
     }
 
     subprojects {
         plugins.withId("com.android.library") {
-            android { buildToolsVersion "36.0.0" }
+            android { buildToolsVersion rootProject.ext.buildToolsVersion }
         }
     }
 }

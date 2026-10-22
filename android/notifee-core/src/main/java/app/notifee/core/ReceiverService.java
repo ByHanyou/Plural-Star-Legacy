@@ -52,13 +52,6 @@ public class ReceiverService extends Service {
   static final String PRESS_INTENT = "app.notifee.core.ReceiverService.PRESS_INTENT";
   static final String ACTION_PRESS_INTENT = "app.notifee.core.ReceiverService.ACTION_PRESS_INTENT";
 
-  /**
-   * Creates a PendingIntent, which when sent triggers this class.
-   *
-   * @param action An Action - matches up with the JS EventType Enum.
-   * @param extraKeys Array of strings
-   * @param extraBundles One or more bundles
-   */
   public static PendingIntent createIntent(
       String action, String[] extraKeys, Bundle... extraBundles) {
     Context context = ContextHolder.getApplicationContext();
@@ -110,7 +103,6 @@ public class ReceiverService extends Service {
     return START_NOT_STICKY;
   }
 
-  /** Handle users delete/dismiss intents */
   private void onDeleteIntent(Intent intent) {
     Bundle notification = intent.getBundleExtra("notification");
 
@@ -123,7 +115,6 @@ public class ReceiverService extends Service {
     EventBus.post(new NotificationEvent(TYPE_DISMISSED, notificationModel));
   }
 
-  /** Handle user notification press */
   private void onPressIntent(Intent intent) {
     Bundle notification = intent.getBundleExtra("notification");
 
@@ -222,8 +213,6 @@ public class ReceiverService extends Service {
       return;
     }
 
-    // BROADCAST_CLOSE_SYSTEM_DIALOGS is protected/system-only, so the library intentionally does
-    // not declare it. Keep this pre-Android 12 legacy broadcast best-effort; Android 12+ skips it.
     try {
       ContextHolder.getApplicationContext()
           .sendBroadcast(new Intent(Intent.ACTION_CLOSE_SYSTEM_DIALOGS));
@@ -264,7 +253,6 @@ public class ReceiverService extends Service {
       pendingContentIntent.send();
       EventBus.postSticky(initialNotificationEvent);
 
-      // Send sticky event to save the mainComponent
       if (mainComponent != null) {
         EventBus.postSticky(new MainComponentEvent(mainComponent));
       }

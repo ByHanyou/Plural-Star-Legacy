@@ -43,7 +43,6 @@ public abstract class NotifeeCoreDatabase extends RoomDatabase {
   static final ListeningExecutorService databaseWriteListeningExecutor =
       MoreExecutors.listeningDecorator(databaseWriteExecutor);
 
-  /** Migrate from version 1 to version 2 by adding the with_alarm_manager column. */
   @VisibleForTesting
   static final Migration MIGRATION_1_2 =
       new Migration(1, 2) {

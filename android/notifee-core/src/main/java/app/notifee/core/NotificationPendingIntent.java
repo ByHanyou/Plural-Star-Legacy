@@ -31,24 +31,8 @@ public class NotificationPendingIntent {
   public static final String NOTIFICATION_ID_INTENT_KEY = "notification_id";
   private static final String TAG = "NotificationPendingIntent";
 
-  /**
-   * Reserved sentinel pressAction id used to signal an explicit opt-out from tap-to-open behavior.
-   * When the TS validator sees {@code pressAction: null}, it emits a pressAction bundle with this
-   * id so the native layer can distinguish "user opted out" from "pressAction absent" (which
-   * triggers the default). DO NOT use this as a real pressAction id.
-   *
-   * <p>The same constant is mirrored in {@code validateAndroidNotification.ts}.
-   */
   public static final String PRESS_ACTION_OPT_OUT_ID = "__NOTIFEE_OPT_OUT__";
 
-  /**
-   * Creates a PendingIntent, which when sent triggers this class.
-   *
-   * @param notificationId int
-   * @param pressActionModelBundle NotificationAndroidPressActionModel.
-   * @param extraKeys Array of strings
-   * @param extraBundles One or more bundles
-   */
   static PendingIntent createIntent(
       int notificationId,
       Bundle pressActionModelBundle,
@@ -57,7 +41,6 @@ public class NotificationPendingIntent {
       Bundle... extraBundles) {
     Context context = ContextHolder.getApplicationContext();
 
-    // Get launch activity intent
     Intent launchActivityIntent = null;
     if (pressActionModelBundle != null) {
       launchActivityIntent =
@@ -67,14 +50,11 @@ public class NotificationPendingIntent {
               NotificationAndroidPressActionModel.fromBundle(pressActionModelBundle));
     }
 
-    // Create an activity to receive notification events
     Intent receiverIntent = new Intent(context, NotificationReceiverActivity.class);
 
-    // Set extras for each intent
     setIntentExtras(launchActivityIntent, eventType, notificationId, extraKeys, extraBundles);
     setIntentExtras(receiverIntent, eventType, notificationId, extraKeys, extraBundles);
 
-    // Create pending intent with activities
     int uniqueInt = UUID.randomUUID().hashCode();
     Intent[] intents;
 
@@ -150,24 +130,18 @@ public class NotificationPendingIntent {
       Intent launchActivityIntent =
           context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());
 
-      // Get launchActivity value from payload
       String launchActivity = null;
       if (pressActionModel != null) {
         launchActivity = pressActionModel.getLaunchActivity();
       }
 
-      // Determine if existing launchActivityIntent should be overwritten
-      // to handle a custom launchActivity
       Boolean shouldOverwriteDefaultLaunchActivityIntent = launchActivityIntent == null;
       if (launchActivityIntent != null) {
-        // overwrite if custom launch activity set (launch activity in payload does not equal
-        // current activity)
         shouldOverwriteDefaultLaunchActivityIntent =
             !"default".equals(launchActivity)
                 && !launchActivityIntent.getComponent().getClassName().equals(launchActivity);
       }
 
-      // Set new launch activity intent
       if (launchActivity != null && shouldOverwriteDefaultLaunchActivityIntent) {
         Class<?> launchActivityClass = IntentUtils.getLaunchActivity(launchActivity);
         launchActivityIntent = new Intent(context, launchActivityClass);
@@ -178,7 +152,6 @@ public class NotificationPendingIntent {
             Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
       }
 
-      // Set any additional flags or main component if specified
       if (pressActionModel.getLaunchActivityFlags() != -1) {
         launchActivityIntent.setFlags(pressActionModel.getLaunchActivityFlags());
       }

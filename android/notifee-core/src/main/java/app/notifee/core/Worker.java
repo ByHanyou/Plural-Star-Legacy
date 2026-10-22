@@ -39,10 +39,6 @@ public class Worker extends ListenableWorker {
 
   private CallbackToFutureAdapter.Completer<Result> mCompleter;
 
-  /**
-   * @param appContext The application {@link Context}
-   * @param workerParams Parameters to setup the internal state of this worker
-   */
   @Keep
   public Worker(@NonNull Context appContext, @NonNull WorkerParameters workerParams) {
     super(appContext, workerParams);
