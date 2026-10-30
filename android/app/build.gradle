@@ -31,8 +31,8 @@ android {
         applicationId "com.pluralspace.app.legacy"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 88
-        versionName "1.23.2"
+        versionCode 89
+        versionName "1.23.3"
     }
 
     signingConfigs {
@@ -73,6 +73,8 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation("androidx.appcompat:appcompat:1.7.1")
     implementation("com.facebook.fresco:animated-gif:3.6.0")
+    implementation("com.facebook.fresco:animated-webp:3.6.0")
+    implementation("com.facebook.fresco:webpsupport:3.6.0")
     implementation("androidx.activity:activity:1.9.3")
 
     if (hermesEnabled.toBoolean()) {

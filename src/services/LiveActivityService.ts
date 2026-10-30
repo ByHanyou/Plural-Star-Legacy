@@ -78,7 +78,7 @@ export const updateFrontLiveActivity = async (
     return;
   }
 
-  const since = frontSessionStart(front);
+  const since = frontSessionStart(front, id => !!members.find(m => m.id === id)?.name);
   await nativeModule.startOrUpdate({
     systemName: systemName || 'Plural Star',
     primaryText,
